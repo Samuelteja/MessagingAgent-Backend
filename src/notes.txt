@@ -1,0 +1,79 @@
+.\venv\Scripts\activate
+uvicorn src.main:app --reload
+npm start and npm run build for wppconnect
+npm start (frontend)
+
+netstat -ano | findstr :8000
+taskkill /PID 3456 /F
+
+1. We are hardcoing that this is Luxr salon in systme prompt which should be handled later. 
+2. cod refractoring 
+3. better taggind and auto tagging by AI
+3. better tagging by AI only. 
+4. they can add exisitn customer database.
+
+Next Steps: Making It All Run (The "Deployment" Plan)
+The code is perfect. Now, let's get it all running together. You have three main components that need to work in harmony:
+The WPPConnect Server (likely in Docker)
+Your FastAPI Backend
+The SQLite Database
+Here is your step-by-step plan to bring your application to life.
+Step 1: Prepare Your Python Environment
+Create requirements.txt: In your project root (C:\projects\MessagingAgent), create a file named requirements.txt and add the dependencies:
+code
+Code
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+python-dotenv
+google-generativeai
+requests
+Create a Virtual Environment & Install:
+code
+Bash
+# From your project root
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+Step 2: Run the WPPConnect Server
+Your Python code is an API client. It needs to talk to the WPPConnect server. The easiest way to run this is using Docker.
+Install Docker Desktop on your Windows PC if you haven't already.
+Run the Server: Open a new terminal and run this command. This will start the WPPConnect server, expose its API on port 21465, and automatically configure it with your secret key.
+code
+Bash
+docker run --rm -it --name wppconnect-server -p 21465:21465 \
+  -e "SECRET_KEY=THISISMYSECURETOKEN" \
+  -e "SESSION_NAME=NERDWHATS_AMERICA" \
+  wppconnect/server
+Scan the QR Code: The terminal will show a QR code. Scan this with the phone you want to use for the bot. Once scanned, the server is live and connected.
+Step 3: Run Your FastAPI Backend
+With the WPPConnect server running in its own terminal, open another terminal for your backend.
+Activate Virtual Environment:
+code
+Bash
+# Make sure you are in C:\projects\MessagingAgent
+.\venv\Scripts\activate
+Start the Server: The create_all command in main.py will automatically create your messaging.db file.
+code
+Bash
+uvicorn src.main:app --reload
+You should see a confirmation that the server is running on http://127.0.0.1:8000.
+Step 4: Connect the Webhook
+Now, you need to tell the WPPConnect server (in Docker) to send all new messages to your FastAPI backend.
+Start a Webhook: You'll need to send a POST request to the WPPConnect server. You can use a tool like Postman, or simply another Python script to do this. The webhook URL must point to your FastAPI server's endpoint.
+code
+Code
+POST http://localhost:21465/api/NERDWHATS_AMERICA/start-webhook
+
+Body (JSON):
+{
+  "url": "http://localhost:8000/webhook/whatsapp",
+  "events": ["onmessage"]
+}
+(Note: For a real server, you would use a tool like ngrok to expose your localhost to the internet, but since both are on the same machine, localhost might work).
+Step 5: End-to-End Test
+Send a WhatsApp message to the number connected to the bot.
+Watch your FastAPI terminal: You should see the logs for /webhook/whatsapp being hit.
+You'll see the logs from the controller, the AI service, and the WhatsApp service.
+You will receive the AI-generated reply on your phone.

@@ -1,0 +1,113 @@
+Week 1: Focus on Advanced Backend, AI Evolution, and Customer Identity
+Day 1: The Ultimate Database Foundation
+Goal: Evolve the database to support all Sprint 3 features.
+Tasks (Backend Team - Junior #1):
+Customer Identity Schema: In models.py, create the Contact table and refactor the Conversation table to use a ForeignKey.
+Campaign Schema: In models.py, create the Campaign and CampaignRecipient tables with all safety columns.
+Update Schemas & CRUD: Update schemas.py and crud.py with the new models and logic for Contact management. Crucially, refactor all existing conversation CRUD functions in crud.py to use JOINs with the new Contact table.
+Day 2: AI Brain Upgrade & Live Infrastructure
+Goal: Teach the AI about customer identity and build the real-time communication channel.
+Tasks:
+AI Lead:
+System Prompt Overhaul: In ai_service.py, update the Gemini system prompt with NEW_CUSTOMER vs. RETURNING_CUSTOMER context, the rule to ask for a name, the NAME_PROVIDED intent, and the "AI with Memory" logic.
+Integrate the BOOKING_ABANDONED intent logic into the prompt.
+Backend Team (Lead):
+WebSocket Setup: Implement the websocket_manager.py service and the /ws/inbox-updates endpoint in main.py.
+{{{
+Primary Workstream 1: AI Logic & Prompt Engineering (AI Lead)
+Primary Workstream 2: Backend API Expansion (Lead Backend Developer)
+}}}
+
+Day 3: The Master Controller - Integrating Identity & Logic
+Goal: Weave the new Customer Identity system and AI capabilities into the core message pipeline.
+Tasks (AI Lead):
+(Refactor for Identity) Core Controller: In message_controller.py, refactor the entire process_incoming_message function.
+The first step must now be contact = crud.get_or_create_contact(...).
+All subsequent calls to crud.log_conversation must be updated to pass contact.id.
+All calls to crud.get_chat_history must be updated to pass contact.contact_id.
+New Logic Integration:
+Add the logic to check for the NAME_PROVIDED intent and update the contact's name in the database.
+Implement the "Stuck Conversation" bug fix.
+Integrate the WebSocket broadcast trigger at the start of the function.
+Day 4: The "Personalized & Safe" Automation Backend
+Goal: Build the broadcast API that is safe and personalized with the customer's name.
+Tasks (Backend Team - Lead):
+Build Broadcast API (POST /api/campaigns/broadcast):
+The endpoint must accept a message template with a {customer_name} placeholder.
+It must perform all safety checks: Daily Limit, Recency, and Outcome.
+Implement Personalized, Staggered Scheduling:
+The scheduler must fetch each recipient's name from the contacts table and inject it into the message.
+It will then schedule these unique messages with a randomized, human-like delay.
+Day 5: Week 1 Integration & API Spec Freeze
+Goal: Ensure all backend components work together and provide a clear contract for the UI team.
+Tasks (Full Team):
+API Documentation & Refactor Check (Backend): The backend team finalizes API specs. They must double-check that all conversation-related endpoints in main.py now correctly return the new Conversation schema which includes the embedded contact object.
+End-to-End Backend Test (AI Lead): Perform the full new-customer conversation simulation to validate the entire identity flow from end to end on the backend.
+UI Prep (UI Team): Review the finalized, refactored API response structure and adjust all UI mockups and data handling plans accordingly.
+Week 2: Focus on the Interactive Dashboard & Full System Integration
+Day 6: The "Live & Personalized" Inbox
+Goal: Transform the inbox into a real-time, user-friendly command center that knows customers by name.
+Tasks (UI Team - 2 Juniors):
+Junior #1 (Live & Personalized UI):
+(Refactor for Identity) API Calls: Update all API service calls in the frontend (getConversations, getConversationHistory) to handle the new nested data structure: response.data.contact.name.
+(Refactor for Identity) UI Display: Update InboxPage.jsx to display contact.name || contact.contact_id in the conversation list and chat header.
+Implement the WebSocket client for live updates.
+Junior #2 (Human Takeover): Build the "Takeover" button and the manual reply UI/API integration.
+Day 7: The Personalized Broadcast Campaign UI
+Goal: Create an intuitive and responsible marketing tool.
+Tasks (UI Team - 1 Junior):
+Build CampaignsPage.jsx:
+Implement the mandatory Disclaimer Modal.
+Add UI support for the {customer_name} placeholder.
+Display the Daily Limit counter.
+Day 8: Advanced Analytics UI
+Goal: Visualize the bot's direct financial impact.
+Tasks (AI Lead / Full-Stack):
+Backend: Create the API endpoint for advanced ROI metrics.
+Frontend: Build the UI on AnalyticsPage.jsx to display the new financial data.
+Day 9: Final Integration & Team Testing
+Goal: Ensure every feature, including the fully refactored identity system, works seamlessly.
+Tasks (Full Team):
+Test Case #1 (New Customer Journey): A new user sends a message, gets asked their name, provides it, and books an appointment. The inbox must update live and show their provided name correctly.
+Test Case #2 (Personalized Campaign): Create a campaign using the {customer_name} placeholder. Launch it and confirm the received message is correctly personalized with the name from the contacts table.
+Bug Bash.
+Day 10: Full System Demo & Sprint Review
+Goal: Demonstrate the complete, personalized, and proactive workflow.
+Demo Plan:
+The New Customer Experience.
+The Personalized Follow-up.
+The Safe & Personalized Revenue Engine (Campaign Tool).
+The Live Takeover & Proof of Value.
+
+
+Code refraction: 
+src/
+├── controllers/
+│   └── message_controller.py
+├── crud/
+│   ├── __init__.py
+│   ├── crud_analytics.py   # NEW: For analytics functions
+│   ├── crud_campaign.py    # NEW: For campaign functions
+│   ├── crud_contact.py     # NEW: For contact & conversation functions
+│   ├── crud_knowledge.py   # NEW: For knowledge, staff, hours
+│   └── crud_tag.py         # NEW: For tag functions
+├── database.py
+├── main.py
+├── models.py
+├── schemas/
+│   ├── __init__.py
+│   ├── analytics_schemas.py
+│   ├── campaign_schemas.py # NEW
+│   ├── contact_schemas.py  # NEW
+│   └── ... (other schema files)
+├── services/
+│   ├── ai_service.py
+│   ├── scheduler_service.py
+│   ├── websocket_manager.py
+│   └── whatsapp_service.py
+└── routers/                # NEW FOLDER
+    ├── __init__.py
+    ├── analytics_router.py # NEW
+    ├── campaign_router.py  # NEW
+    ├── contact_router.py   # NEW (for conversations & tags)
+    └── knowledge_router.py # NEW (for knowledge, staff, hours)
