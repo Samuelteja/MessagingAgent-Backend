@@ -8,7 +8,8 @@ import random
 from datetime import datetime, time as time_obj, timezone
 from typing import Tuple
 from ..services.websocket_manager import manager
-from ..schemas import NormalizedMessage
+from ..crud import crud_analytics, crud_campaign, crud_contact, crud_knowledge, crud_tag
+from ..schemas import analytics_schemas, campaign_schemas, contact_schemas, knowledge_schemas, tag_schemas, webhook_schemas
 
 # --- CONFIGURATION ---
 MIN_DELAY_SECONDS = 1.8
@@ -38,7 +39,7 @@ def get_business_status(db: Session) -> Tuple[str, str]:
     Returns a tuple: (status: str, off_hours_message: str)
     status can be: "OPEN", "CLOSED_QUIET", "CLOSED_AWAKE"
     """
-    business_hours_list = crud.get_business_hours(db)
+    business_hours_list = crud_knowledge.get_business_hours(db)
     if not business_hours_list:
         return ("OPEN", "") # Default to OPEN if no hours are configured
 
@@ -89,35 +90,43 @@ def update_conversation_with_ai_analysis(db: Session, conversation: models.Conve
         
         # 2. Automatically create and assign an outcome tag (logic is the same)
         outcome_tag_name = f"outcome:{intent.lower()}"
-        tag = crud.get_tag_by_name(db, name=outcome_tag_name)
+        tag = crud_tag.get_tag_by_name(db, name=outcome_tag_name)
         if not tag:
-            tag = crud.create_tag(db, schemas.TagCreate(name=outcome_tag_name))
+            tag = crud_tag.create_tag(db, schemas.TagCreate(name=outcome_tag_name))
         
         if tag not in conversation.tags:
             conversation.tags.append(tag)
             print(f"✅ Automatically assigned tag: '{outcome_tag_name}'")
 
-    # The rest for AI-suggested tags is the same
     tag_names = analysis.get("tags", [])
     if tag_names:
+        contact = conversation.contact
+        
+        existing_tag_names = {tag.name for tag in contact.tags}
+        
+        new_tags_to_add = []
         for tag_name in tag_names:
-            tag = crud.get_tag_by_name(db, name=tag_name)
-            if tag and tag not in conversation.tags:
-                conversation.tags.append(tag)
+            if tag_name not in existing_tag_names:
+                tag = crud_tag.get_tag_by_name(db, name=tag_name)
+                if tag:
+                    new_tags_to_add.append(tag)
+        
+        if new_tags_to_add:
+            contact.tags.extend(new_tags_to_add)
+            print(f"✅ AI suggested new tags for contact {contact.contact_id}: {[t.name for t in new_tags_to_add]}")
     
     if intent == "HUMAN_HANDOFF":
         print(f"🤖 Intent is HUMAN_HANDOFF. Automatically pausing AI for contact {conversation.contact.contact_id}")
         # We reuse the existing CRUD function to set the pause.
         # The default pause is 12 hours, giving the owner plenty of time to respond.
-        crud.set_ai_pause(db, contact_id=conversation.contact.contact_id)
+        crud_contact.set_ai_pause(db, contact_id=conversation.contact.contact_id)
         
     db.commit()
-    print(f"✅ Conversation {conversation.id} updated with outcome and tags.")
 
 # ==============================================================================
 # --- THE NEW, FULLY REFACTORED MAIN CONTROLLER ---
 # ==============================================================================
-async def process_incoming_message(message: NormalizedMessage, db: Session):
+async def process_incoming_message(message: webhook_schemas.NormalizedMessage, db: Session):
     """
     This is the core logic pipeline. It is now completely independent of the
     message source (WhatsApp, Instagram, etc.).
@@ -131,7 +140,7 @@ async def process_incoming_message(message: NormalizedMessage, db: Session):
     print(f"\n--- New [{channel}] Message Pipeline Started for '{sender_name or sender_number}' ---")
     
     # Get or create the contact record in our database.
-    contact = crud.get_or_create_contact(db, contact_id=sender_number, pushname=sender_name)
+    contact = crud_contact.get_or_create_contact(db, contact_id=sender_number, pushname=sender_name)
     pause_timestamp = contact.ai_is_paused_until
 
     if pause_timestamp:
@@ -141,7 +150,7 @@ async def process_incoming_message(message: NormalizedMessage, db: Session):
         # Now, the comparison is safe
         if pause_timestamp > datetime.now(timezone.utc):
             print(f"-> AI is manually paused for {contact.contact_id}. Ignoring incoming message.")
-            crud.log_conversation(
+            crud_contact.log_conversation(
                 db=db,
                 channel=message.channel,
                 contact_db_id=contact.id,
@@ -153,28 +162,28 @@ async def process_incoming_message(message: NormalizedMessage, db: Session):
             return
     
     # Notify the live dashboard immediately.
-    await manager.broadcast({"type": "new_message", "contact": schemas.Contact.from_orm(contact).model_dump()})
+    await manager.broadcast({"type": "new_message", "contact": contact_schemas.Contact.from_orm(contact).model_dump()})
 
     # --- STAGE 1: BUSINESS HOURS CHECK ---
     status, off_hours_message = get_business_status(db)
 
     if status == "CLOSED_QUIET":
         print(f"=> STAGE 1 [{channel}]: Business in 'Quiet Hours'. Ignoring.")
-        crud.log_conversation(db, channel, contact.id, message_body, None, "received_ignored_quiet_hours")
+        crud_contact.log_conversation(db, channel, contact.id, message_body, None, "received_ignored_quiet_hours")
         print(f"--- Pipeline Finished (Quiet Hours) for [{channel}] ---\n")
         return
 
     if status == "CLOSED_AWAKE":
         print(f"=> STAGE 1 [{channel}]: Business closed, but not in quiet hours.")
-        last_convo = crud.get_last_conversation(db, contact_id=sender_number)
+        last_convo = crud_contact.get_last_conversation(db, contact_id=sender_number)
         if last_convo and last_convo.status == "replied_off_hours":
             print("   - Already sent off-hours message. Ignoring.")
-            crud.log_conversation(db, channel, contact.id, message_body, None, "received_ignored_off_hours")
+            crud_contact.log_conversation(db, channel, contact.id, message_body, None, "received_ignored_off_hours")
             print(f"--- Pipeline Finished (Ignored) for [{channel}] ---\n")
             return
         else:
             print("   - Sending off-hours message.")
-            crud.log_conversation(db, channel, contact.id, message_body, off_hours_message, "replied_off_hours")
+            crud_contact.log_conversation(db, channel, contact.id, message_body, off_hours_message, "replied_off_hours")
             # For now, we assume only WhatsApp can send replies. This will be refactored on Day 4.
             if channel == "WhatsApp":
                 whatsapp_service.send_reply(sender_number, off_hours_message)
@@ -184,7 +193,7 @@ async def process_incoming_message(message: NormalizedMessage, db: Session):
     print(f"=> STAGE 1 [{channel}]: Business is OPEN. Proceeding...")
 
     # --- STAGE 2: PREPARE CONVERSATION HISTORY ---
-    db_history = crud.get_chat_history(db, contact_id=sender_number, limit=10)
+    db_history = crud_contact.get_chat_history(db, contact_id=sender_number, limit=10)
     is_new_customer_for_ai = not contact.is_name_confirmed
     is_new_interaction = len(db_history) <= 1
 
@@ -218,11 +227,11 @@ async def process_incoming_message(message: NormalizedMessage, db: Session):
         provided_name = analysis.get("entities", {}).get("customer_name")
         if provided_name and not contact.is_name_confirmed:
             print(f"✅ AI extracted customer name: '{provided_name}'. Updating and confirming contact.")
-            crud.update_contact_name(db, contact_id=sender_number, new_name=provided_name)
+            crud_contact.update_contact_name(db, contact_id=sender_number, new_name=provided_name)
     
     # --- STAGE 4: LOG & UPDATE DATABASE ---
     print(f"=> STAGE 4 [{channel}]: Logging conversation and updating with AI analysis...")
-    new_conversation = crud.log_conversation(
+    new_conversation = crud_contact.log_conversation(
         db=db,
         channel=channel,
         contact_db_id=contact.id,

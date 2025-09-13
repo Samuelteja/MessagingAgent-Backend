@@ -9,6 +9,11 @@ conversation_tags_association = Table('conversation_tags_association', Base.meta
     Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True)
 )
 
+contact_tags_association = Table('contact_tags_association', Base.metadata,
+    Column('contact_id', Integer, ForeignKey('contacts.id'), primary_key=True),
+    Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True)
+)
+
 class Contact(Base):
     __tablename__ = "contacts"
 
@@ -19,6 +24,7 @@ class Contact(Base):
     ai_is_paused_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     conversations = relationship("Conversation", back_populates="contact", cascade="all, delete-orphan")
+    tags = relationship("Tag", secondary=contact_tags_association, back_populates="contacts")
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -32,14 +38,13 @@ class Conversation(Base):
     status = Column(String, default="received")
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     outcome = Column(String, default="pending", nullable=False)
-    tags = relationship("Tag", secondary=conversation_tags_association, back_populates="conversations")
 
 class Tag(Base):
     __tablename__ = "tags"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False, index=True)
-    conversations = relationship("Conversation", secondary=conversation_tags_association, back_populates="tags")
+    contacts = relationship("Contact", secondary=contact_tags_association, back_populates="tags")
 
 # --- Campaign MODELS ---
 class Campaign(Base):
@@ -142,3 +147,12 @@ class UpsellRule(Base):
     # This relationship defines which service is being offered.
     upsold_service = relationship("MenuItem", foreign_keys=[upsell_menu_item_id])
     
+class BusinessProfile(Base):
+    __tablename__ = "business_profile"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    business_name = Column(String, nullable=False, default="My Salon")
+    business_description = Column(Text, nullable=True)
+    address = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)

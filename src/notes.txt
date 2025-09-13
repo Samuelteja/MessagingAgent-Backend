@@ -3,8 +3,10 @@ uvicorn src.main:app --reload
 npm start and npm run build for wppconnect
 npm start (frontend)
 
+cloudflared tunnel --url http://localhost:8000
+
 netstat -ano | findstr :8000
-taskkill /PID 3456 /F
+taskkill /PID 6132 /F
 
 1. We are hardcoing that this is Luxr salon in systme prompt which should be handled later. 
 2. cod refractoring 

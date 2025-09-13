@@ -5,7 +5,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from ..database import SQLALCHEMY_DATABASE_URL, SessionLocal
 import atexit
 from datetime import datetime, timezone
-from .. import crud, models
+from .. import models
 from . import whatsapp_service
 
 jobstores = {

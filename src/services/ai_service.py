@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 from datetime import datetime
 from sqlalchemy.orm import Session
-from src import crud, schemas, menu_crud
 from typing import Optional, List, Dict
 from .. import models
+from ..crud import crud_analytics, crud_campaign, crud_contact, crud_knowledge, crud_tag, crud_menu, crud_profile
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
@@ -23,8 +23,6 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-BUSINESS_NAME = "Luxe Salon"
-BUSINESS_DESCRIPTION = "A premium hair and beauty salon located in Hyderabad, India."
 
 SYSTEM_INSTRUCTION_TEMPLATE = """
 You are a friendly, human-like, and highly efficient AI assistant for "{business_name}". Your primary goal is to understand a user's request, extract key information using the provided context, and suggest a reply.
@@ -141,13 +139,21 @@ def _get_business_context(db: Session) -> str:
     """
     context_parts = []
 
+    profile = crud_profile.get_profile(db)
+    if profile:
+        context_parts.append(f"## Business Information:")
+        if profile.address:
+            context_parts.append(f"- Location: {profile.address}")
+        if profile.phone_number:
+            context_parts.append(f"- Contact Number: {profile.phone_number}")
+
     # 1. Fetch Q&A from the old knowledge table
-    knowledge_items = crud.get_knowledge_items(db, limit=200)
+    knowledge_items = crud_knowledge.get_knowledge_items(db, limit=200)
     qas = [f"- Q: {item.key}\\n  A: {item.value}" for item in knowledge_items if item.type == 'QA']
     if qas: context_parts.append("## Frequently Asked Questions:\\n" + "\\n".join(qas))
     
     # --- 2. FETCH FROM NEW MENU & UPSELL TABLES ---
-    menu_items = menu_crud.get_menu_items(db)
+    menu_items = crud_menu.get_menu_items(db)
     if menu_items:
         # Format the menu for the AI
         menu_list = [f"- {item.name} ({item.category}): Rs. {item.price}. Description: {item.description}" for item in menu_items]
@@ -162,13 +168,13 @@ def _get_business_context(db: Session) -> str:
             context_parts.append("## Upsell Rules:\\n" + "\\n".join(upsell_rules))
             
     # 3. Fetch Staff Roster (unchanged)
-    staff_members = crud.get_staff_members(db, limit=50)
+    staff_members = crud_knowledge.get_staff_members(db, limit=50)
     if staff_members:
         staff_list = [f"- {member.name} (Specialties: {member.specialties})" for member in staff_members]
         context_parts.append("## Staff & Specialties:\\n" + "\\n".join(staff_list))
 
     # 4. Fetch Available Tags (unchanged)
-    tags = crud.get_tags(db, limit=100)
+    tags = crud_tag.get_tags(db, limit=100)
     if tags:
         tag_list = [f'"{tag.name}"' for tag in tags]
         context_parts.append("## Available Tags:\\n[" + ", ".join(tag_list) + "]")
@@ -187,7 +193,10 @@ def analyze_message(
     """
     try:
         # --- Step 1: Fetch dynamic business context (unchanged) ---
-        print("🧠 Fetching business context from database...")
+        print("🏢 Fetching business profile from database...")
+        profile = crud_profile.get_profile(db)
+        business_name = profile.business_name
+        business_description = profile.business_description
         business_context_str = _get_business_context(db)
         
         # --- Step 2: Build the NEW Dynamic Customer Context String ---
@@ -207,8 +216,8 @@ def analyze_message(
         print(f"🤖 Building prompt with customer context: '{customer_context_string}'")
         today_str = datetime.now().strftime("%A, %B %d, %Y")
         system_instruction = SYSTEM_INSTRUCTION_TEMPLATE.format(
-            business_name=BUSINESS_NAME,
-            business_description=BUSINESS_DESCRIPTION,
+            business_name=business_name,
+            business_description=business_description,
             current_date=today_str,
             customer_context_string=customer_context_string,
             business_context=business_context_str

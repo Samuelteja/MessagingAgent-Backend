@@ -1,113 +1,163 @@
-Week 1: Focus on Advanced Backend, AI Evolution, and Customer Identity
-Day 1: The Ultimate Database Foundation
-Goal: Evolve the database to support all Sprint 3 features.
-Tasks (Backend Team - Junior #1):
-Customer Identity Schema: In models.py, create the Contact table and refactor the Conversation table to use a ForeignKey.
-Campaign Schema: In models.py, create the Campaign and CampaignRecipient tables with all safety columns.
-Update Schemas & CRUD: Update schemas.py and crud.py with the new models and logic for Contact management. Crucially, refactor all existing conversation CRUD functions in crud.py to use JOINs with the new Contact table.
-Day 2: AI Brain Upgrade & Live Infrastructure
-Goal: Teach the AI about customer identity and build the real-time communication channel.
+Excellent. That is a perfectly focused and achievable sprint plan.
+
+By prioritizing Architecture (Refactoring), Onboarding (Customer Import), Multi-tenancy (Decoupling Identity), and Expansion (Instagram), you are tackling the most critical structural and growth-oriented features. Deferring the advanced AI tuning is a smart move that ensures we can deliver these foundational pieces with high quality.
+
+Here is the revised, 10-day sprint plan based on your final selected milestones.
+
+Official Sprint 4 Plan: "Architecture, Onboarding & Multi-Channel"
+
+Sprint Goal: To transform the application into a truly scalable, multi-tenant platform by (1) executing a major code refactoring, (2) decoupling the business identity, (3) building a feature to import existing customers, and (4) laying the groundwork for Instagram integration.
+
+Week 1: The Great Separation & Decoupling (Backend Focus)
+
+(The primary goal this week is to refactor the entire backend into a clean, modular architecture and remove all hardcoded business-specific values.)
+
+Day 1: Splitting the Data Logic Layer (Refactoring)
+
+Goal: Break down the monolithic crud.py file into domain-focused modules.
+
+Tasks (Backend Team):
+
+Create the src/crud/ directory and new files (crud_contact.py, crud_campaign.py, etc.).
+
+Carefully move the corresponding SQLAlchemy functions from the old crud.py into these new files.
+
+Begin the tedious but critical task of updating all import statements in the controllers and services that were pointing to the old crud.py.
+
+Verification: Test a key feature (like the Inbox page) to ensure the new crud imports are working correctly.
+
+Day 2: Splitting the Schema & API Layers (Refactoring)
+
+Goal: Break down schemas.py and main.py to complete the refactoring.
+
+Tasks (Backend Team):
+
+Create src/schemas/ and src/routers/ directories.
+
+Split schemas.py into smaller, domain-focused files (contact_schemas.py, etc.). Update all imports.
+
+Move all API endpoint functions from main.py into their respective router files (contact_router.py, etc.), changing @app decorators to @router.
+
+Completely slim down main.py so its main job is to include_router for all the new router files.
+
+Verification: Run the application and use the auto-generated /docs page to confirm that all endpoints are still present and functional.
+
+Day 3: Decoupling Business Identity (Backend)
+
+Goal: Create the database and API foundation for a multi-tenant system.
+
+Tasks (Backend Team):
+
+Database: In models.py, create a new BusinessProfile table with columns for business_name, business_description, etc. For now, it will only have one row.
+
+CRUD/Router: Create new crud/crud_profile.py and routers/profile_router.py files.
+
+Implement the CRUD functions and API endpoints to GET and PUT the business profile data.
+
+Refactor AI Service: In ai_service.py, remove the hardcoded global variables. Modify the analyze_message function so that it now fetches the business name and description from the database via the new CRUD function at the start of every call.
+
+Day 4: Customer Import Backend
+
+Goal: Build the backend functionality to allow a bulk import of existing customers from a file.
+
+Tasks (Backend Team):
+
+Create a new endpoint in a routers/contact_router.py: POST /api/contacts/bulk-import.
+
+The endpoint will accept a list of new contact data (e.g., [{name: "Priya Kumar", contact_id: "91...c.us"}, ...]).
+
+The core logic will loop through this list and use the existing crud.get_or_create_contact function. This is key, as it will intelligently update existing contacts with a proper name or create new ones, preventing duplicates.
+
+Day 5: Week 1 Integration & Testing
+
+Goal: Verify all the new backend architecture and features are stable and working as expected.
+
+Tasks (Full Team):
+
+Backend Verification: Use Postman to thoroughly test all the new and moved endpoints:
+
+Can you still fetch conversations?
+
+Can you GET and PUT the new Business Profile?
+
+Can you successfully POST a list of new customers to the /bulk-import endpoint and see them in the contacts table?
+
+Full Regression Test: Run the Sprint 3 test plan to ensure the refactoring has not introduced any regressions.
+
+Week 2: Frontend Implementation & Instagram Groundwork
+
+(The primary goal this week is to build the UI for the new backend features and complete the administrative setup for Instagram.)
+
+Day 6: Business Profile UI
+
+Goal: Build the user interface for managing the decoupled business identity.
+
+Tasks (Frontend Team):
+
+Create a new page component: frontend/src/pages/BusinessProfilePage.jsx.
+
+Add the route for this new page in App.js and a link in the Sidebar.js.
+
+Build a simple form on this page with fields for "Business Name" and "Business Description".
+
+On page load, use useEffect to GET the current profile from /api/profile and populate the form.
+
+When the user saves the form, make a PUT request to /api/profile with the new data.
+
+Day 7: Customer Import UI
+
+Goal: Build an intuitive UI for the customer import feature.
+
+Tasks (Frontend Team):
+
+Create a new page component: frontend/src/pages/ImportCustomersPage.jsx. Add the route and sidebar link.
+
+The page should have a file input that accepts CSV/Excel files.
+
+Use a frontend library (like papaparse or xlsx) to parse the uploaded file in the browser.
+
+Display a preview of the parsed data in a simple table so the user can verify it.
+
+On a "Confirm Import" button click, send the final JSON array to the POST /api/contacts/bulk-import endpoint.
+
+Day 8: Instagram Integration - Admin & Discussion
+
+Goal: Complete all administrative prerequisites for Instagram and plan the technical implementation.
+
 Tasks:
-AI Lead:
-System Prompt Overhaul: In ai_service.py, update the Gemini system prompt with NEW_CUSTOMER vs. RETURNING_CUSTOMER context, the rule to ask for a name, the NAME_PROVIDED intent, and the "AI with Memory" logic.
-Integrate the BOOKING_ABANDONED intent logic into the prompt.
-Backend Team (Lead):
-WebSocket Setup: Implement the websocket_manager.py service and the /ws/inbox-updates endpoint in main.py.
-{{{
-Primary Workstream 1: AI Logic & Prompt Engineering (AI Lead)
-Primary Workstream 2: Backend API Expansion (Lead Backend Developer)
-}}}
 
-Day 3: The Master Controller - Integrating Identity & Logic
-Goal: Weave the new Customer Identity system and AI capabilities into the core message pipeline.
-Tasks (AI Lead):
-(Refactor for Identity) Core Controller: In message_controller.py, refactor the entire process_incoming_message function.
-The first step must now be contact = crud.get_or_create_contact(...).
-All subsequent calls to crud.log_conversation must be updated to pass contact.id.
-All calls to crud.get_chat_history must be updated to pass contact.contact_id.
-New Logic Integration:
-Add the logic to check for the NAME_PROVIDED intent and update the contact's name in the database.
-Implement the "Stuck Conversation" bug fix.
-Integrate the WebSocket broadcast trigger at the start of the function.
-Day 4: The "Personalized & Safe" Automation Backend
-Goal: Build the broadcast API that is safe and personalized with the customer's name.
-Tasks (Backend Team - Lead):
-Build Broadcast API (POST /api/campaigns/broadcast):
-The endpoint must accept a message template with a {customer_name} placeholder.
-It must perform all safety checks: Daily Limit, Recency, and Outcome.
-Implement Personalized, Staggered Scheduling:
-The scheduler must fetch each recipient's name from the contacts table and inject it into the message.
-It will then schedule these unique messages with a randomized, human-like delay.
-Day 5: Week 1 Integration & API Spec Freeze
-Goal: Ensure all backend components work together and provide a clear contract for the UI team.
-Tasks (Full Team):
-API Documentation & Refactor Check (Backend): The backend team finalizes API specs. They must double-check that all conversation-related endpoints in main.py now correctly return the new Conversation schema which includes the embedded contact object.
-End-to-End Backend Test (AI Lead): Perform the full new-customer conversation simulation to validate the entire identity flow from end to end on the backend.
-UI Prep (UI Team): Review the finalized, refactored API response structure and adjust all UI mockups and data handling plans accordingly.
-Week 2: Focus on the Interactive Dashboard & Full System Integration
-Day 6: The "Live & Personalized" Inbox
-Goal: Transform the inbox into a real-time, user-friendly command center that knows customers by name.
-Tasks (UI Team - 2 Juniors):
-Junior #1 (Live & Personalized UI):
-(Refactor for Identity) API Calls: Update all API service calls in the frontend (getConversations, getConversationHistory) to handle the new nested data structure: response.data.contact.name.
-(Refactor for Identity) UI Display: Update InboxPage.jsx to display contact.name || contact.contact_id in the conversation list and chat header.
-Implement the WebSocket client for live updates.
-Junior #2 (Human Takeover): Build the "Takeover" button and the manual reply UI/API integration.
-Day 7: The Personalized Broadcast Campaign UI
-Goal: Create an intuitive and responsible marketing tool.
-Tasks (UI Team - 1 Junior):
-Build CampaignsPage.jsx:
-Implement the mandatory Disclaimer Modal.
-Add UI support for the {customer_name} placeholder.
-Display the Daily Limit counter.
-Day 8: Advanced Analytics UI
-Goal: Visualize the bot's direct financial impact.
-Tasks (AI Lead / Full-Stack):
-Backend: Create the API endpoint for advanced ROI metrics.
-Frontend: Build the UI on AnalyticsPage.jsx to display the new financial data.
-Day 9: Final Integration & Team Testing
-Goal: Ensure every feature, including the fully refactored identity system, works seamlessly.
-Tasks (Full Team):
-Test Case #1 (New Customer Journey): A new user sends a message, gets asked their name, provides it, and books an appointment. The inbox must update live and show their provided name correctly.
-Test Case #2 (Personalized Campaign): Create a campaign using the {customer_name} placeholder. Launch it and confirm the received message is correctly personalized with the name from the contacts table.
-Bug Bash.
-Day 10: Full System Demo & Sprint Review
-Goal: Demonstrate the complete, personalized, and proactive workflow.
+Admin/Lead: This is a non-coding day focused on process. Navigate the Meta Developer Portal. Create the App, connect the Facebook Page and Instagram Business Account, and request the necessary permissions (instagram_basic, instagram_manage_messages, pages_manage_metadata). Document the App ID, App Secret, and get a Page Access Token.
+
+Full Team (Afternoon):
+
+Technical Discussion: Review the Instagram Messenger API documentation.
+
+Plan the implementation: How will we store the Page Access Token securely? What will the database schema look like for Instagram-specific IDs? How will the normalization layer in the webhook work? This planning session is crucial for a smooth start to the coding in the next sprint.
+
+Day 9: Bug Fixing & UI Polish
+
+Goal: Harden the new features and refine the user experience.
+
+Tasks (Frontend Team):
+
+Thoroughly test the Business Profile and Customer Import pages.
+
+Add loading indicators and handle potential API errors gracefully (e.g., showing a user-friendly error message if a file upload fails).
+
+Review the entire application for any UI inconsistencies or small bugs that have emerged.
+
+Day 10: Final Demo & Sprint Review
+
+Goal: Demonstrate the new architectural stability and the powerful new onboarding features.
+
 Demo Plan:
-The New Customer Experience.
-The Personalized Follow-up.
-The Safe & Personalized Revenue Engine (Campaign Tool).
-The Live Takeover & Proof of Value.
 
+Showcase the Refactoring (Briefly): Explain how the clean new code structure in the backend will accelerate future development.
 
-Code refraction: 
-src/
-├── controllers/
-│   └── message_controller.py
-├── crud/
-│   ├── __init__.py
-│   ├── crud_analytics.py   # NEW: For analytics functions
-│   ├── crud_campaign.py    # NEW: For campaign functions
-│   ├── crud_contact.py     # NEW: For contact & conversation functions
-│   ├── crud_knowledge.py   # NEW: For knowledge, staff, hours
-│   └── crud_tag.py         # NEW: For tag functions
-├── database.py
-├── main.py
-├── models.py
-├── schemas/
-│   ├── __init__.py
-│   ├── analytics_schemas.py
-│   ├── campaign_schemas.py # NEW
-│   ├── contact_schemas.py  # NEW
-│   └── ... (other schema files)
-├── services/
-│   ├── ai_service.py
-│   ├── scheduler_service.py
-│   ├── websocket_manager.py
-│   └── whatsapp_service.py
-└── routers/                # NEW FOLDER
-    ├── __init__.py
-    ├── analytics_router.py # NEW
-    ├── campaign_router.py  # NEW
-    ├── contact_router.py   # NEW (for conversations & tags)
-    └── knowledge_router.py # NEW (for knowledge, staff, hours)
+Demo the Business Profile: Go to the new page, change the Salon Name from "Luxe Salon" to "Priya's Beauty Hub." Start a new WhatsApp conversation and show that the AI now introduces itself with the new name.
+
+Demo the Customer Import: Upload a sample CSV of 3-4 customers. Show the preview table in the UI. Click import and then navigate to the Inbox page to show that the new contacts are now available.
+
+Discuss Instagram: Present the successful setup in the Meta Developer Portal and outline the clear plan for the technical implementation in Sprint 5.
+
+Sprint 4 Deliverable: A refactored, stable, multi-tenant-ready application with a critical customer onboarding feature, and a clear path forward for Instagram integration.

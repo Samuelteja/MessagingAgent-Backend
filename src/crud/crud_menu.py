@@ -1,7 +1,9 @@
 # src/menu_crud.py
 from sqlalchemy.orm import Session
 from typing import List
-from . import models, menu_schemas
+
+from ..schemas import menu_schemas
+from .. import models
 
 # --- Menu Item CRUD ---
 def get_menu_items(db: Session):
