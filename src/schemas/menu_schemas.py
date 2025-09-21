@@ -1,4 +1,4 @@
-# src/menu_schemas.py
+# src/schemas/menu_schemas.py
 from pydantic import BaseModel
 from typing import Optional, List
 

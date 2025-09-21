@@ -1,8 +1,9 @@
+# src/routers/knowledge_router.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from ..schemas import knowledge_schemas
-from ..crud import crud_knowledge
+from ..schemas import knowledge_schemas 
+from ..crud import crud_knowledge, crud_ai_tagging
 from ..database import SessionLocal
 
 router = APIRouter(
@@ -69,3 +70,4 @@ def create_knowledge_bulk(items: List[knowledge_schemas.BusinessKnowledgeCreate]
     
     print(f"✅ Successfully bulk-inserted {count} items of type '{item_type}'.")
     return {"status": "success", "items_created": count}
+

@@ -10,7 +10,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
 from .. import models
-from ..crud import crud_analytics, crud_campaign, crud_contact, crud_knowledge, crud_tag, crud_menu, crud_profile
+from ..crud import crud_profile, crud_knowledge, crud_menu, crud_tag
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
@@ -30,7 +30,8 @@ Business Overview: {business_description}
 
 **SESSION CONTEXT (Information about THIS specific conversation):**
 - Today's date is: {current_date}
-- {customer_context_string} 
+- {customer_context_string}
+- **PRE-ANALYZED TAGS:** Our system has pre-scanned the user's message and suggests that the following tags may be relevant. If you agree with this analysis based on the full conversation, please include them in your 'tags' array output: **{list_of_relevant_tags}**
 
 **BUSINESS CONTEXT (Permanent facts about the salon that you MUST use):**
 {business_context}
@@ -68,22 +69,22 @@ Your main goal is to be a reactive, conversational assistant. Answer ONLY the us
 
 1.  **USE THE CONTEXT:** You MUST use the information from the 'BUSINESS CONTEXT' section to answer questions about prices, services, staff, and business hours. Do not make up information.
 2.  **Language Handling:** You will receive messages in English, Hindi, and "Hinglish". You must understand all of them. However, **you MUST ALWAYS create the 'reply' in simple, polite, and professional English.**
-3.  **TAGGING:** If a user mentions a specific service (e.g., "hair coloring"), you MUST add the corresponding tag (e.g., "interest:hair-coloring") to the 'tags' array in your JSON response.
-4.  **Date Resolution:** Use the "Today's date" context to accurately resolve relative dates like "tomorrow", "yesterday", "a couple of days later", or "over the weekend". Never ask the user to clarify what "tomorrow" means.
-5.  **Goal is Booking:** The 'reply' should aim to lead the conversation towards booking an appointment.
-6.  **Use History & Avoid Repetition:** Use the conversation history to understand context, but do not repeat information in your 'reply' that has already been provided.
-7.  **Add Personality:** Use emojis where appropriate in the 'reply' to maintain a friendly tone (e.g., 😊, 👍), but do not overdo it.
-8.  **No External Links:** Do not include any links in the 'reply' unless specifically asked for.
-9. **SAFETY & HANDOFF:** If the user expresses frustration (e.g., "this is not working"), confusion, or asks to speak to a person, a manager, or a senior, you MUST set the intent to HUMAN_HANDOFF.
+3.  **Date Resolution:** Use the "Today's date" context to accurately resolve relative dates like "tomorrow", "yesterday", "a couple of days later", or "over the weekend". Never ask the user to clarify what "tomorrow" means.
+4.  **Goal is Booking:** The 'reply' should aim to lead the conversation towards booking an appointment.
+5.  **Use History & Avoid Repetition:** Use the conversation history to understand context, but do not repeat information in your 'reply' that has already been provided.
+6.  **Add Personality:** Use emojis where appropriate in the 'reply' to maintain a friendly tone (e.g., 😊, 👍), but do not overdo it.
+7.  **No External Links:** Do not include any links in the 'reply' unless specifically asked for.
+8. **SAFETY & HANDOFF:** If the user expresses frustration (e.g., "this is not working"), confusion, or asks to speak to a person, a manager, or a senior, you MUST set the intent to HUMAN_HANDOFF.
 10. **BOOKING INTENT:**
-    - If a user inquires about booking but does not provide enough information (e.g., "I want a haircut"), set intent to BOOKING_INCOMPLETE.
-    - If a user provides all necessary details and you confirm a time and date, set intent to BOOKING_CONFIRMED.
-11. **HUMAN_HANDOFF INTENT:**
+    - If a user inquires about booking but does not provide enough information (e.g., "I want a haircut"), set intent to `BOOKING_INCOMPLETE`.
+    - **[NEW RULE]** If a user provides all necessary details (service, date, time) and your reply is the one that confirms the booking, you MUST set the intent to `BOOKING_CONFIRMED`. Use this intent when you are making the final confirmation message.
+    - **[NEW RULE]** The `BOOK_APPOINTMENT` intent should be used for intermediate steps, for example, if the user provides the service and date, and you are now asking them for the time.
+10. **HUMAN_HANDOFF INTENT:**
     For a HUMAN_HANDOFF intent, the 'reply' should be a polite escalation message. Frame it as connecting them to an expert, not as a failure.
     Example Handoff Reply: "That's a great question. To make sure you get the best answer, I'm connecting you with our Salon Manager. They've been notified and will reply to you here shortly. 😊"
-12. **STAFF RECOMMENDATIONS:** Only recommend a staff member if the user explicitly asks a question about WHO performs a service (e.g., "who is good at coloring?", "who is your specialist?"). If they just ask for a service (e.g., "do you do haircuts?"), simply confirm that you offer the service without mentioning a staff member's name.
-13. **UPSELLING:** After a user confirms a booking (intent is BOOKING_CONFIRMED), you MUST check '## Upsell Rules'. If the booked service is a 'TRIGGER SERVICE', you must NATURALLY INTEGRATE the 'SUGGESTION MESSAGE' into your confirmation reply. Your reply should be a single, smooth message.
-14. **NEW CUSTOMER GREETING & NAME ACQUISITION:**
+11. **STAFF RECOMMENDATIONS:** Only recommend a staff member if the user explicitly asks a question about WHO performs a service (e.g., "who is good at coloring?", "who is your specialist?"). If they just ask for a service (e.g., "do you do haircuts?"), simply confirm that you offer the service without mentioning a staff member's name.
+12. **UPSELLING:** After a user confirms a booking (intent is BOOKING_CONFIRMED or BOOK_APPOINTMENT), you MUST check '## Upsell Rules'. If the booked service is a 'TRIGGER SERVICE', you must NATURALLY INTEGRATE the 'SUGGESTION MESSAGE' into your confirmation reply. Your reply should be a single, smooth message.
+13. **NEW CUSTOMER GREETING & NAME ACQUISITION:**
     - If the 'SESSION CONTEXT' identifies a 'NEW_CUSTOMER', your reply MUST perform two actions in one message:
       1. Directly answer their immediate question.
       2. Politely ask for their name.
@@ -91,16 +92,16 @@ Your main goal is to be a reactive, conversational assistant. Answer ONLY the us
     - **GOOD Example:** User asks "do you do haircuts?". Your reply: "Yes, we do offer haircuts! So I can help you better, what is your name?"
     - **BAD Example:** "Yes we do haircuts. How can I help?" (This is bad because it fails to ask for the name).
 
-15. **RETURNING CUSTOMER GREETING:** If the 'SESSION CONTEXT' identifies a 'RETURNING_CUSTOMER', you MUST greet them personally by their name in the first message of a new conversation.
+14. **RETURNING CUSTOMER GREETING:** If the 'SESSION CONTEXT' identifies a 'RETURNING_CUSTOMER', you MUST greet them personally by their name in the first message of a new conversation.
     - Example: "Welcome back, Priya! How can we help you today?"
 
-16. **NAME EXTRACTION & CONFIRMATION:**
+15. **NAME EXTRACTION & CONFIRMATION:**
     - When a user provides their name, you MUST set the intent to 'NAME_PROVIDED' and extract their name into the 'customer_name' entity.
     - The 'reply' for this intent MUST be a simple, friendly confirmation that also re-engages the original topic.
     - **GOOD Example:** "Thanks, Priya! Now, about that haircut you were looking for, what day and time works best for you?"
     - **BAD Example:** "Thanks!" (This is bad because it stops the conversation flow).
 
-17. **"ABANDONED CART" DETECTION:** If a user has provided a service, a date, AND a time, but then goes silent or asks a non-confirming question, you MUST set the intent to 'BOOKING_ABANDONED'.
+16. **"ABANDONED CART" DETECTION:** If a user has provided a service, a date, AND a time, but then goes silent or asks a non-confirming question, you MUST set the intent to 'BOOKING_ABANDONED'.
 
 *CONVERSATIONAL TIPS:**
 
@@ -173,12 +174,6 @@ def _get_business_context(db: Session) -> str:
         staff_list = [f"- {member.name} (Specialties: {member.specialties})" for member in staff_members]
         context_parts.append("## Staff & Specialties:\\n" + "\\n".join(staff_list))
 
-    # 4. Fetch Available Tags (unchanged)
-    tags = crud_tag.get_tags(db, limit=100)
-    if tags:
-        tag_list = [f'"{tag.name}"' for tag in tags]
-        context_parts.append("## Available Tags:\\n[" + ", ".join(tag_list) + "]")
-    
     return "\\n\\n".join(context_parts)
 
 def analyze_message(
@@ -186,7 +181,8 @@ def analyze_message(
     db: Session,
     db_contact: 'models.Contact',
     is_new_customer: bool,
-    is_new_interaction: bool
+    is_new_interaction: bool,
+    relevant_tags: List[str]
 ) -> Dict:
     """
     Generates a reply using the Gemini model, now including BOTH business AND customer context.
@@ -220,6 +216,7 @@ def analyze_message(
             business_description=business_description,
             current_date=today_str,
             customer_context_string=customer_context_string,
+            list_of_relevant_tags=str(relevant_tags) if relevant_tags else "[]",
             business_context=business_context_str
         )
 
@@ -278,3 +275,104 @@ def analyze_message(
             "reply": "That's a good question and I want to make sure you get the right answer. I'm connecting you with our Salon Manager now, and they will be in touch with you here shortly. Thanks for your patience!",
             "confidence_score": 0.0
         }
+    
+def generate_tagging_rules_from_menu(menu_items: List[models.MenuItem]) -> List[Dict]:
+    """
+    Uses a specialized Gemini prompt to analyze a list of menu items
+    and generate a list of suggested keyword-to-tag rules.
+    """
+    print("🧠 Calling Gemini for smart tag generation...")
+    if not menu_items:
+        return []
+
+    # Format the menu for the AI prompt
+    menu_list_str = "\n".join([f"- {item.name} (Description: {item.description or 'N/A'})" for item in menu_items])
+
+    generation_prompt = f"""
+    You are an expert marketing analyst for a local service business. Your task is to analyze a list of services from a business's menu and generate a list of relevant keywords that customers might use to inquire about them. Your goal is to create tags that are useful for future marketing campaigns.
+
+    **CRITICAL RULES:**
+    1.  **Analyze and Group:** Look for patterns. If you see "Haircut - Women's", "Haircut - Men's", and "Haircut - Kids", you must recognize that "haircut" is the base service and "women's", "men's", "kids" are modifiers.
+    2.  **Create Specific Tags:** For each unique service, create a specific, hyphenated tag. For example, "Haircut - Women's" should produce a tag like `interest:womens-haircut`. The tag should be lowercase and "slugified" (no spaces or special characters).
+    3.  **Identify All Relevant Keywords:** For each specific tag, list ALL the keywords a user might type to find it. "Haircut - Women's" could be found by typing "haircut", "ladies haircut", "women's cut", or "haircut for women".
+    4.  **Consolidate Keywords:** If multiple services share a general keyword (like "haircut"), you should link that keyword to the most general or primary service tag.
+    5.  **Output Format:** Your response MUST be ONLY a single, valid JSON object with a single key "rules". Do not add any text, code fences, or explanations.
+    6.  **JSON Structure:** The JSON must be an array of objects, where each object contains a SINGLE keyword and the ONE specific tag it should apply. If a tag has multiple keywords, create a separate object for each keyword. `[{{"keyword": "...", "suggested_tag_name": "..."}}]`
+
+    **EXAMPLE:**
+    *   INPUT MENU:
+        - Haircut - Women's (Category: Hair)
+        - Haircut - Men's (Category: Hair)
+        - Bridal Makeup Package (Category: Makeup)
+    *   YOUR JSON OUTPUT:
+        {{
+            "rules": [
+                {{ "keyword": "haircut", "suggested_tag_name": "interest:haircut" }},
+                {{ "keyword": "ladies haircut", "suggested_tag_name": "interest:womens-haircut" }},
+                {{ "keyword": "womens cut", "suggested_tag_name": "interest:womens-haircut" }},
+                {{ "keyword": "mens haircut", "suggested_tag_name": "interest:mens-haircut" }},
+                {{ "keyword": "bridal", "suggested_tag_name": "interest:bridal-makeup" }},
+                {{ "keyword": "makeup", "suggested_tag_name": "interest:bridal-makeup" }}
+            ]
+        }}
+
+    ---
+    **MENU TO ANALYZE:**
+    {menu_list_str}
+    """
+
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        response = model.generate_content(generation_prompt)
+        
+        if not response.candidates:
+            print("❌ Gemini response was blocked. No candidates returned.")
+            if hasattr(response, 'prompt_feedback'):
+                print(f"   - Prompt Feedback: {response.prompt_feedback}")
+            return []
+
+        # 2. Get the first candidate from the list.
+        first_candidate = response.candidates[0]
+        
+        # 3. NOW, check the finish_reason on the individual candidate object.
+        if first_candidate.finish_reason.name != "STOP":
+            print(f"❌ Gemini response finished with non-STOP reason: {first_candidate.finish_reason.name}")
+            if hasattr(first_candidate, 'safety_ratings'):
+                print(f"   - Safety Ratings: {first_candidate.safety_ratings}")
+            return []
+        # =========================================================================
+
+        raw_response_text = response.text
+        if not raw_response_text.strip():
+            print("❌ Gemini returned an empty text response.")
+            return []
+            
+        print(f"✅ Gemini Raw Response: {raw_response_text}")
+
+        # JSON Extractor (this part is correct and remains the same)
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', raw_response_text, re.DOTALL)
+        json_string = ""
+        if json_match:
+            json_string = json_match.group(1)
+        else:
+            json_string = raw_response_text
+
+        print(f"✅ Extracted JSON String for parsing: {json_string}")
+        
+        json_response = json.loads(json_string)
+        rules = json_response.get("rules", [])
+        
+        if not isinstance(rules, list):
+            print(f"❌ AI returned JSON, but the 'rules' key is not a list. Type: {type(rules)}")
+            return []
+
+        print(f"   - Gemini (Advanced) successfully suggested {len(rules)} new keyword-tag rules.")
+        return rules
+
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Parsing Error after extraction. The content inside the JSON is invalid. Error: {e}")
+        print(f"   - Attempted to parse: {json_string}")
+        return []
+    except Exception as e:
+        print(f"❌ An unexpected error occurred during advanced AI tag generation: {e}")
+        return []

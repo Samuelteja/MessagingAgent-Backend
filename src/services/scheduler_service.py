@@ -71,6 +71,59 @@ def cleanup_expired_campaigns():
     finally:
         db.close()
 
+def _execute_pending_tasks():
+    """
+    This is the main job function that runs every minute. It finds and processes
+    all due tasks from the scheduled_tasks table.
+    """
+    # Each job runs in its own thread, so it needs to create its own DB session.
+    db = SessionLocal()
+    try:
+        print(f"⏰ [{datetime.now()}] Running scheduler job: Processing pending tasks...")
+        
+        # Find all pending tasks where the scheduled time is now or in the past.
+        due_tasks = (
+            db.query(models.ScheduledTask)
+            .filter(
+                models.ScheduledTask.status == 'pending',
+                models.ScheduledTask.scheduled_time <= datetime.now(timezone.utc)
+            )
+            .limit(20)
+            .all()
+        )
+
+        if not due_tasks:
+            print("   - No due tasks found.")
+            return
+
+        print(f"   - Found {len(due_tasks)} due task(s) to process.")
+        
+        # This is the fault-tolerant loop we discussed.
+        for task in due_tasks:
+            try:
+                print(f"   -> Processing Task ID: {task.id}, Type: {task.task_type}, Contact: {task.contact_id}")
+                
+                # For now, we only have the WhatsApp channel.
+                # In Week 2, this will be replaced by the unified notification_service.
+                whatsapp_service.send_reply(task.contact_id, task.content)
+                
+                # If sending was successful, update the status.
+                task.status = 'sent'
+                print(f"      - Successfully sent. Status updated to 'sent'.")
+
+            except Exception as e:
+                # If an error occurs (e.g., invalid phone number), mark the task as 'failed'
+                # and log the error. This prevents the entire job from crashing.
+                print(f"      - ❌ ERROR processing Task ID {task.id}: {e}")
+                task.status = 'failed'
+            
+            # Commit the status change (either 'sent' or 'failed') for each task individually.
+            db.commit()
+
+    finally:
+        # Always ensure the database session is closed.
+        db.close()
+
 def initialize_scheduler():
     """
     Initializes and starts the global scheduler, now with the real job.
@@ -96,46 +149,15 @@ def initialize_scheduler():
             replace_existing=True
         )
 
+        scheduler.add_job(
+            _execute_pending_tasks,
+            'interval',
+            minutes=1,
+            id='execute_pending_tasks_job',
+            replace_existing=True
+        )
+
         atexit.register(lambda: scheduler.shutdown())
         
     except Exception as e:
         print(f"❌ Error starting APScheduler: {e}")
-
-# --- EXAMPLE JOB FUNCTION ---
-# This is a placeholder to show how a job is defined. We will create the real
-# job functions (send_reminder, send_followup) in the coming days.
-def _send_whatsapp_message_job(phone_number: str, message: str):
-    """
-    This is the function the scheduler will execute at the scheduled time.
-    It will eventually call our whatsapp_service to send the message.
-    NOTE: We cannot pass a database session directly to a scheduled job.
-    The job runs in a separate thread and needs to create its own session.
-    """
-    print(f"⏰ EXECUTING SCHEDULED JOB: Send '{message}' to {phone_number}")
-    # In a future step, this will be:
-    # from . import whatsapp_service
-    # from ..database import SessionLocal
-    # db = SessionLocal()
-    # whatsapp_service.send_reply(phone_number, message)
-    # db.close()
-
-# --- PUBLIC SCHEDULING FUNCTIONS ---
-def schedule_message(phone_number: str, message: str, run_date: datetime):
-    """
-    Adds a new message-sending job to the scheduler.
-    """
-    if not isinstance(run_date, datetime):
-        raise TypeError("run_date must be a datetime object")
-
-    job_id = f"send_message_{phone_number}_{int(run_date.timestamp())}"
-    
-    print(f"🗓️ Scheduling message for {phone_number} at {run_date}. Job ID: {job_id}")
-    
-    scheduler.add_job(
-        _send_whatsapp_message_job,
-        'date',
-        run_date=run_date,
-        args=[phone_number, message],
-        id=job_id,
-        replace_existing=True
-    )

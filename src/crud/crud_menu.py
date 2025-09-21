@@ -1,4 +1,4 @@
-# src/menu_crud.py
+# src/crud/crud_menu.py
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -23,7 +23,9 @@ def bulk_create_menu_items(db: Session, items: List[menu_schemas.MenuItemCreate]
     db_items = [models.MenuItem(**item.dict()) for item in items]
     db.bulk_save_objects(db_items)
     db.commit()
-    return len(db_items)
+    for item in db_items:
+        db.refresh(item)
+    return db_items
 
 # --- Upsell Rule CRUD ---
 def create_or_update_upsell_rule(db: Session, trigger_item_id: int, rule: menu_schemas.UpsellRuleCreate):

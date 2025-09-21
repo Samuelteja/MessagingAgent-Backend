@@ -1,14 +1,16 @@
 # src/controllers/message_controller.py
+import dateutil.parser
+from datetime import timedelta
 import asyncio
 from sqlalchemy.orm import Session
 from .. import schemas, crud, models
-from ..services import ai_service, whatsapp_service
+from ..services import ai_service, whatsapp_service, tag_pre_scanner
 import time
 import random
 from datetime import datetime, time as time_obj, timezone
 from typing import Tuple
 from ..services.websocket_manager import manager
-from ..crud import crud_analytics, crud_campaign, crud_contact, crud_knowledge, crud_tag
+from ..crud import crud_analytics, crud_campaign, crud_contact, crud_knowledge, crud_tag, crud_booking, crud_scheduler
 from ..schemas import analytics_schemas, campaign_schemas, contact_schemas, knowledge_schemas, tag_schemas, webhook_schemas
 
 # --- CONFIGURATION ---
@@ -19,6 +21,70 @@ CHARS_PER_SECOND_FACTOR = 35
 # ==============================================================================
 # --- STAGE 1: BUSINESS & QUIET HOURS CHECK (UPGRADED LOGIC) ---
 # ==============================================================================
+
+def _act_on_ai_analysis(db: Session, contact: models.Contact, analysis: dict):
+    """
+    This function takes the AI's analysis and performs all the necessary
+    database actions: updating tags, creating bookings, and scheduling tasks.
+    """
+    print("🤖 Acting on AI analysis...")
+    intent = analysis.get("intent")
+    entities = analysis.get("entities", {})
+    
+    # 1. Apply AI-suggested tags to the contact's profile
+    tag_names = analysis.get("tags", [])
+    if tag_names:
+        print(f"   - AI suggested tags: {tag_names}. Applying to contact {contact.contact_id}...")
+        crud_tag.update_tags_for_contact(db, contact_id=contact.contact_id, tag_names=tag_names)
+
+    # 2. Handle Booking Creation and Reminder Scheduling
+    if intent in ["BOOKING_CONFIRMED", "BOOK_APPOINTMENT"]:
+        print(f"   - Intent is '{intent}'. Processing booking...")
+        service = entities.get("service")
+        date_str = entities.get("date")
+        time_str = entities.get("time")
+
+        if service and date_str and time_str:
+            try:
+                booking_datetime_str = f"{date_str} {time_str}"
+                booking_datetime = dateutil.parser.parse(booking_datetime_str)
+
+                # Create the booking in the database
+                new_booking = crud_booking.create_booking(
+                    db,
+                    contact_db_id=contact.id,
+                    service_name=service,
+                    booking_datetime=booking_datetime
+                )
+
+                # Schedule the 24-hour reminder
+                reminder_time = booking_datetime - timedelta(hours=24)
+                reminder_content = f"Hi {contact.name or 'there'}! Just a friendly reminder about your appointment for a {service} tomorrow at {booking_datetime.strftime('%I:%M %p')}. We look forward to seeing you!"
+                crud_scheduler.create_scheduled_task(
+                    db,
+                    contact_id=contact.contact_id,
+                    task_type="APPOINTMENT_REMINDER",
+                    scheduled_time=reminder_time,
+                    content=reminder_content
+                )
+            except dateutil.parser.ParserError as e:
+                print(f"   - ❌ Error parsing date/time from AI entities: {e}")
+        else:
+            print("   - ⚠️ Warning: BOOKING_CONFIRMED intent received, but missing service, date, or time entities.")
+            
+    # 3. Handle "Abandoned Cart" Follow-up Scheduling
+    if intent == "BOOKING_ABANDONED":
+        print("   - Intent is BOOKING_ABANDONED. Scheduling a follow-up.")
+        follow_up_time = datetime.now(timezone.utc) + timedelta(hours=24)
+        service = entities.get("service", "your appointment")
+        follow_up_content = f"Hi {contact.name or 'there'}, just following up. You were about to book a {service} with us. We may still have slots available. Would you like to continue?"
+        crud_scheduler.create_scheduled_task(
+            db,
+            contact_id=contact.contact_id,
+            task_type="LEAD_FOLLOWUP",
+            scheduled_time=follow_up_time,
+            content=follow_up_content
+        )
 
 def _is_time_in_range(start: time_obj, end: time_obj, current: time_obj) -> bool:
     """
@@ -75,53 +141,53 @@ def get_business_status(db: Session) -> Tuple[str, str]:
 # ==============================================================================
 # --- STAGE 4: DATABASE UPDATE LOGIC (UNCHANGED) ---
 # ==============================================================================
-def update_conversation_with_ai_analysis(db: Session, conversation: models.Conversation, analysis: dict):
+# def update_conversation_with_ai_analysis(db: Session, conversation: models.Conversation, analysis: dict):
     # --- THIS SECTION IS MODIFIED with the "Stuck Conversation" bug fix ---
-    intent = analysis.get("intent")
+#     intent = analysis.get("intent")
     
     # 1. Update the outcome - with the bug fix
-    if intent in ["BOOKING_CONFIRMED", "HUMAN_HANDOFF"]:
+#     if intent in ["BOOKING_CONFIRMED", "HUMAN_HANDOFF"]:
         # --- REFACTOR ---: The "Stuck Conversation" Bug Fix
         # Only update the outcome if the current state is not already 'booking_confirmed'.
-        if conversation.outcome != 'booking_confirmed':
-            conversation.outcome = intent.lower()
-        else:
-            print("INFO: Ignored outcome update because conversation is already confirmed.")
+#         if conversation.outcome != 'booking_confirmed':
+#             conversation.outcome = intent.lower()
+#         else:
+#             print("INFO: Ignored outcome update because conversation is already confirmed.")
         
         # 2. Automatically create and assign an outcome tag (logic is the same)
-        outcome_tag_name = f"outcome:{intent.lower()}"
-        tag = crud_tag.get_tag_by_name(db, name=outcome_tag_name)
-        if not tag:
-            tag = crud_tag.create_tag(db, schemas.TagCreate(name=outcome_tag_name))
-        
-        if tag not in conversation.tags:
-            conversation.tags.append(tag)
-            print(f"✅ Automatically assigned tag: '{outcome_tag_name}'")
+#         outcome_tag_name = f"outcome:{intent.lower()}"
+#         tag = crud_tag.get_tag_by_name(db, name=outcome_tag_name)
+#       if not tag:
+#              tag = crud_tag.create_tag(db, schemas.TagCreate(name=outcome_tag_name))
+#
+#         if tag not in conversation.tags:
+#             conversation.tags.append(tag)
+#             print(f"✅ Automatically assigned tag: '{outcome_tag_name}'")
 
-    tag_names = analysis.get("tags", [])
-    if tag_names:
-        contact = conversation.contact
+#     tag_names = analysis.get("tags", [])
+#     if tag_names:
+#         contact = conversation.contact
+#         print(f"   - AI suggested tags: {tag_names}. Applying to contact {contact.contact_id}...")
+#         existing_tag_names = {tag.name for tag in contact.tags}
         
-        existing_tag_names = {tag.name for tag in contact.tags}
+#         new_tags_to_add = []
+#         for tag_name in tag_names:
+#             if tag_name not in existing_tag_names:
+ #                tag = crud_tag.get_tag_by_name(db, name=tag_name)
+#                 if tag:
+ #                    new_tags_to_add.append(tag)
         
-        new_tags_to_add = []
-        for tag_name in tag_names:
-            if tag_name not in existing_tag_names:
-                tag = crud_tag.get_tag_by_name(db, name=tag_name)
-                if tag:
-                    new_tags_to_add.append(tag)
-        
-        if new_tags_to_add:
-            contact.tags.extend(new_tags_to_add)
-            print(f"✅ AI suggested new tags for contact {contact.contact_id}: {[t.name for t in new_tags_to_add]}")
+#         if new_tags_to_add:
+#             contact.tags.extend(new_tags_to_add)
+#             print(f"✅ AI suggested new tags for contact {contact.contact_id}: {[t.name for t in new_tags_to_add]}")
     
-    if intent == "HUMAN_HANDOFF":
-        print(f"🤖 Intent is HUMAN_HANDOFF. Automatically pausing AI for contact {conversation.contact.contact_id}")
+#     if intent == "HUMAN_HANDOFF":
+#         print(f"🤖 Intent is HUMAN_HANDOFF. Automatically pausing AI for contact {conversation.contact.contact_id}")
         # We reuse the existing CRUD function to set the pause.
         # The default pause is 12 hours, giving the owner plenty of time to respond.
-        crud_contact.set_ai_pause(db, contact_id=conversation.contact.contact_id)
+ #        crud_contact.set_ai_pause(db, contact_id=conversation.contact.contact_id)
         
-    db.commit()
+ #    db.commit()
 
 # ==============================================================================
 # --- THE NEW, FULLY REFACTORED MAIN CONTROLLER ---
@@ -212,12 +278,14 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     if channel == "WhatsApp":
         whatsapp_service.set_typing(sender_number, True)
     
+    relevant_tags = tag_pre_scanner.find_relevant_tags(message_body, db)
     analysis = ai_service.analyze_message(
         chat_history=gemini_history, 
         db=db, 
         db_contact=contact,
         is_new_customer=is_new_customer_for_ai,
-        is_new_interaction=is_new_interaction
+        is_new_interaction=is_new_interaction,
+        relevant_tags=relevant_tags
     )
     
     ai_reply = analysis.get("reply", "I'm having a little trouble with that request. I've notified our Salon Manager, and they will get back to you here shortly. Thanks for your patience!")
@@ -239,7 +307,7 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
         outgoing_text=ai_reply,
         status="replied"
     )
-    update_conversation_with_ai_analysis(db, new_conversation, analysis)
+    _act_on_ai_analysis(db, contact, analysis)
 
     # --- STAGE 5: SEND REPLY ---
     print(f"=> STAGE 5 [{channel}]: Sending reply...")

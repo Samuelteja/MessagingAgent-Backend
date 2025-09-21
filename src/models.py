@@ -25,6 +25,7 @@ class Contact(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     conversations = relationship("Conversation", back_populates="contact", cascade="all, delete-orphan")
     tags = relationship("Tag", secondary=contact_tags_association, back_populates="contacts")
+    bookings = relationship("Booking", back_populates="contact", cascade="all, delete-orphan")
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -45,6 +46,7 @@ class Tag(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, nullable=False, index=True)
     contacts = relationship("Contact", secondary=contact_tags_association, back_populates="tags")
+    rules = relationship("TagRule", back_populates="tag", cascade="all, delete-orphan")
 
 # --- Campaign MODELS ---
 class Campaign(Base):
@@ -156,3 +158,35 @@ class BusinessProfile(Base):
     business_description = Column(Text, nullable=True)
     address = Column(String, nullable=True)
     phone_number = Column(String, nullable=True)
+
+class TagRule(Base):
+    """
+    Stores the rules that link a keyword to a specific tag in the main 'tags' table.
+    This replaces the old ai_interest_tags table for a more robust, unified system.
+    """
+    __tablename__ = "tag_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    keyword = Column(String, unique=True, nullable=False, index=True)
+    
+    # This is the Foreign Key to our single, unified 'tags' table.
+    tag_id = Column(Integer, ForeignKey('tags.id'), nullable=False)
+    
+    # This defines the relationship back to the Tag object.
+    tag = relationship("Tag", back_populates="rules")
+
+
+class Booking(Base):
+    """
+    Stores a record of a confirmed appointment made by the AI.
+    """
+    __tablename__ = "bookings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    contact_db_id = Column(Integer, ForeignKey('contacts.id'), nullable=False)
+    service_name = Column(String, nullable=False)
+    booking_datetime = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, default="confirmed", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    contact = relationship("Contact", back_populates="bookings")

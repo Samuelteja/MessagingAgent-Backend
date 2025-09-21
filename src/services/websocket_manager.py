@@ -1,3 +1,5 @@
+# src/services/websocket_manager.py
+
 from fastapi import WebSocket
 from typing import List, Dict, Any
 from pydantic.json import pydantic_encoder

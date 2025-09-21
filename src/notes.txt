@@ -6,10 +6,8 @@ npm start (frontend)
 cloudflared tunnel --url http://localhost:8000
 
 netstat -ano | findstr :8000
-taskkill /PID 6132 /F
+taskkill /PID 2476 /F
 
-1. We are hardcoing that this is Luxr salon in systme prompt which should be handled later. 
-2. cod refractoring 
 3. better taggind and auto tagging by AI
 3. better tagging by AI only. 
 4. they can add exisitn customer database.

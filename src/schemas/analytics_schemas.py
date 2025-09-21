@@ -1,4 +1,4 @@
-# src/analytics_schemas.py.
+# src/schemas/analytics_schemas.py
 from pydantic import BaseModel
 from typing import List, Dict
 

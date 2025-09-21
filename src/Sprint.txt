@@ -1,163 +1,65 @@
-Excellent. That is a perfectly focused and achievable sprint plan.
-
-By prioritizing Architecture (Refactoring), Onboarding (Customer Import), Multi-tenancy (Decoupling Identity), and Expansion (Instagram), you are tackling the most critical structural and growth-oriented features. Deferring the advanced AI tuning is a smart move that ensures we can deliver these foundational pieces with high quality.
-
-Here is the revised, 10-day sprint plan based on your final selected milestones.
-
-Official Sprint 4 Plan: "Architecture, Onboarding & Multi-Channel"
-
-Sprint Goal: To transform the application into a truly scalable, multi-tenant platform by (1) executing a major code refactoring, (2) decoupling the business identity, (3) building a feature to import existing customers, and (4) laying the groundwork for Instagram integration.
-
-Week 1: The Great Separation & Decoupling (Backend Focus)
-
-(The primary goal this week is to refactor the entire backend into a clean, modular architecture and remove all hardcoded business-specific values.)
-
-Day 1: Splitting the Data Logic Layer (Refactoring)
-
-Goal: Break down the monolithic crud.py file into domain-focused modules.
-
-Tasks (Backend Team):
-
-Create the src/crud/ directory and new files (crud_contact.py, crud_campaign.py, etc.).
-
-Carefully move the corresponding SQLAlchemy functions from the old crud.py into these new files.
-
-Begin the tedious but critical task of updating all import statements in the controllers and services that were pointing to the old crud.py.
-
-Verification: Test a key feature (like the Inbox page) to ensure the new crud imports are working correctly.
-
-Day 2: Splitting the Schema & API Layers (Refactoring)
-
-Goal: Break down schemas.py and main.py to complete the refactoring.
-
-Tasks (Backend Team):
-
-Create src/schemas/ and src/routers/ directories.
-
-Split schemas.py into smaller, domain-focused files (contact_schemas.py, etc.). Update all imports.
-
-Move all API endpoint functions from main.py into their respective router files (contact_router.py, etc.), changing @app decorators to @router.
-
-Completely slim down main.py so its main job is to include_router for all the new router files.
-
-Verification: Run the application and use the auto-generated /docs page to confirm that all endpoints are still present and functional.
-
-Day 3: Decoupling Business Identity (Backend)
-
-Goal: Create the database and API foundation for a multi-tenant system.
-
-Tasks (Backend Team):
-
-Database: In models.py, create a new BusinessProfile table with columns for business_name, business_description, etc. For now, it will only have one row.
-
-CRUD/Router: Create new crud/crud_profile.py and routers/profile_router.py files.
-
-Implement the CRUD functions and API endpoints to GET and PUT the business profile data.
-
-Refactor AI Service: In ai_service.py, remove the hardcoded global variables. Modify the analyze_message function so that it now fetches the business name and description from the database via the new CRUD function at the start of every call.
-
-Day 4: Customer Import Backend
-
-Goal: Build the backend functionality to allow a bulk import of existing customers from a file.
-
-Tasks (Backend Team):
-
-Create a new endpoint in a routers/contact_router.py: POST /api/contacts/bulk-import.
-
-The endpoint will accept a list of new contact data (e.g., [{name: "Priya Kumar", contact_id: "91...c.us"}, ...]).
-
-The core logic will loop through this list and use the existing crud.get_or_create_contact function. This is key, as it will intelligently update existing contacts with a proper name or create new ones, preventing duplicates.
-
-Day 5: Week 1 Integration & Testing
-
-Goal: Verify all the new backend architecture and features are stable and working as expected.
-
-Tasks (Full Team):
-
-Backend Verification: Use Postman to thoroughly test all the new and moved endpoints:
-
-Can you still fetch conversations?
-
-Can you GET and PUT the new Business Profile?
-
-Can you successfully POST a list of new customers to the /bulk-import endpoint and see them in the contacts table?
-
-Full Regression Test: Run the Sprint 3 test plan to ensure the refactoring has not introduced any regressions.
-
-Week 2: Frontend Implementation & Instagram Groundwork
-
-(The primary goal this week is to build the UI for the new backend features and complete the administrative setup for Instagram.)
-
-Day 6: Business Profile UI
-
-Goal: Build the user interface for managing the decoupled business identity.
-
-Tasks (Frontend Team):
-
-Create a new page component: frontend/src/pages/BusinessProfilePage.jsx.
-
-Add the route for this new page in App.js and a link in the Sidebar.js.
-
-Build a simple form on this page with fields for "Business Name" and "Business Description".
-
-On page load, use useEffect to GET the current profile from /api/profile and populate the form.
-
-When the user saves the form, make a PUT request to /api/profile with the new data.
-
-Day 7: Customer Import UI
-
-Goal: Build an intuitive UI for the customer import feature.
-
-Tasks (Frontend Team):
-
-Create a new page component: frontend/src/pages/ImportCustomersPage.jsx. Add the route and sidebar link.
-
-The page should have a file input that accepts CSV/Excel files.
-
-Use a frontend library (like papaparse or xlsx) to parse the uploaded file in the browser.
-
-Display a preview of the parsed data in a simple table so the user can verify it.
-
-On a "Confirm Import" button click, send the final JSON array to the POST /api/contacts/bulk-import endpoint.
-
-Day 8: Instagram Integration - Admin & Discussion
-
-Goal: Complete all administrative prerequisites for Instagram and plan the technical implementation.
-
+Sprint 5 Plan: "The Automation & Expansion Sprint"
+Sprint Goal: To deliver three major, high-value features and a foundational automated testing suite by the end of the 10-day sprint. The deliverables are: (1) Full Instagram Integration, (2) Intelligent AI Tagging, (3) Proactive Reminders/Follow-ups, and (4) a Selenium-based E2E Testing Tool.
+Week 1: Parallel Development & Foundation Building
+(The goal this week is to build the backend and UI for all three new features in parallel and to set up the foundation for the testing tool.)
+Day 1-2: Backend Foundation for All Features (Backend Team)
+Goal: Build all the necessary database, CRUD, and API endpoints for the three new features.
 Tasks:
-
-Admin/Lead: This is a non-coding day focused on process. Navigate the Meta Developer Portal. Create the App, connect the Facebook Page and Instagram Business Account, and request the necessary permissions (instagram_basic, instagram_manage_messages, pages_manage_metadata). Document the App ID, App Secret, and get a Page Access Token.
-
-Full Team (Afternoon):
-
-Technical Discussion: Review the Instagram Messenger API documentation.
-
-Plan the implementation: How will we store the Page Access Token securely? What will the database schema look like for Instagram-specific IDs? How will the normalization layer in the webhook work? This planning session is crucial for a smooth start to the coding in the next sprint.
-
-Day 9: Bug Fixing & UI Polish
-
-Goal: Harden the new features and refine the user experience.
-
-Tasks (Frontend Team):
-
-Thoroughly test the Business Profile and Customer Import pages.
-
-Add loading indicators and handle potential API errors gracefully (e.g., showing a user-friendly error message if a file upload fails).
-
-Review the entire application for any UI inconsistencies or small bugs that have emerged.
-
-Day 10: Final Demo & Sprint Review
-
-Goal: Demonstrate the new architectural stability and the powerful new onboarding features.
-
+Instagram Webhook (webhook_router.py): Build the POST /webhook/instagram endpoint, including the full logic for parsing the Instagram payload and normalizing it into our NormalizedMessage object.
+Notification Service (notification_service.py): Build the unified send_reply service. Implement the Instagram reply logic using a POST request to the Meta Graph API with the Page Access Token.
+Proactive Logic (message_controller.py): Add the logic to create scheduled_tasks records for "APPOINTMENT_REMINDER" on a BOOKING_CONFIRMED intent and "LEAD_FOLLOWUP" on a BOOKING_ABANDONED intent.
+AI Tagging DB (models.py & crud_knowledge.py): Create a new ai_interest_tags table (id, keyword, tag_to_apply). Build the CRUD functions and API endpoints for the owner to manage this list of keywords.
+Day 1-2: Selenium Tool Setup & First Test (Dedicated Tester/Dev)
+Goal: Set up the automated testing project and create the first, most critical test case.
+Tasks:
+Project Setup: Create a new, separate project folder (e.g., MessagingAgent-Tests). Set up a Python environment with selenium and pytest.
+WebDriver Setup: Configure Selenium WebDriver for Chrome.
+Login Test: Write the first test script (test_login.py) that can successfully open the browser, navigate to the dashboard login page, enter credentials, and verify a successful login. This is the foundation for all other tests.
+Day 3: Backend Integration & AI Prompt Upgrade (Backend Team)
+Goal: Connect all the backend pieces and upgrade the AI's intelligence.
+Tasks:
+Refactor Controller: Fully refactor message_controller.py to use the new notification_service for sending all replies.
+Upgrade ai_service.py:
+Modify the _get_business_context function to now fetch the list of "interest keywords" from the new ai_interest_tags table.
+Inject this list into the system prompt with a new, forceful rule: "You MUST check the user's message against the '## Interest Keywords' list. If a keyword is present, you MUST include the corresponding tag in your JSON output."
+Day 4-5: Frontend UI Build for AI Tagging & Proactive Features (Frontend Team)
+Goal: Build the user interfaces for the two new management features.
+Tasks:
+AI Tagging UI: Create a new page, "AI Tagging Rules." Build a simple UI with a form that allows the owner to add, view, and delete keyword-to-tag mappings by calling the new backend endpoints.
+Scheduled Messages UI: Create a new page, "Scheduled Outreach." Build a simple table that fetches and displays all tasks from the scheduled_tasks table with a status of "pending". This gives the owner visibility into upcoming reminders and follow-ups.
+Day 4-5: Selenium Test Expansion (Dedicated Tester/Dev)
+Goal: Automate the testing of the complete "New Customer" journey.
+Tasks:
+Build WhatsApp Interaction Library: Write helper functions that use the WPPConnect API directly to send a message from a test number and to poll for the latest reply. This is how the test will simulate a user.
+Write test_new_customer_flow.py: This script will:
+Send a "Hi" message via the helper library.
+Poll for the AI's "What's your name?" reply.
+Send a name and service request.
+Poll for the AI's confirmation reply.
+Log in to the dashboard with Selenium, navigate to the Inbox, and assert that the new conversation is present and the contact's name has been correctly updated.
+Week 2: Full Integration, Testing Automation, and Review
+(The goal this week is to connect the Instagram UI, complete the core test suite, and ensure all four deliverables are stable.)
+Day 6-7: End-to-End Instagram Integration (Full Team)
+Goal: Connect the fully functional backend to the frontend and test the complete flow.
+Tasks:
+Full-Stack Test: The team works together to send a DM to the test Instagram account.
+VERIFY (Backend): The POST /webhook/instagram is hit, and the message is normalized and processed.
+VERIFY (Frontend): The new message appears in the Unified Inbox with an Instagram icon.
+VERIFY (Full Loop): The AI's reply is successfully sent back to the user on Instagram. Test the "Human Takeover" feature for an Instagram chat.
+Day 8-9: Finalize the Selenium Test Suite (Dedicated Tester/Dev)
+Goal: Create automated tests for the most critical business features.
+Tasks:
+Write test_human_takeover.py: This script will simulate a conversation, then use Selenium to log in, click the "Takeover" button, send a manual reply, and verify the message is received.
+Write test_campaign_safety.py: This script will use the backend API to launch a campaign targeting a test user who has had a recent conversation. It will then assert that the API's "Smart Launch" summary correctly reports "eligible_after_safety_check": 0.
+Day 9: Final Feature Integration & UI Polish (Frontend Team)
+Goal: Ensure all new pages are linked and the UI is clean.
+Tasks:
+Add the final links for "AI Tagging Rules" and "Scheduled Outreach" to the Sidebar.js.
+Review the entire application for any UI inconsistencies and perform a final polish.
+Day 10: Full System Demo & Sprint Review
+Goal: Demonstrate all four major deliverables.
 Demo Plan:
-
-Showcase the Refactoring (Briefly): Explain how the clean new code structure in the backend will accelerate future development.
-
-Demo the Business Profile: Go to the new page, change the Salon Name from "Luxe Salon" to "Priya's Beauty Hub." Start a new WhatsApp conversation and show that the AI now introduces itself with the new name.
-
-Demo the Customer Import: Upload a sample CSV of 3-4 customers. Show the preview table in the UI. Click import and then navigate to the Inbox page to show that the new contacts are now available.
-
-Discuss Instagram: Present the successful setup in the Meta Developer Portal and outline the clear plan for the technical implementation in Sprint 5.
-
-Sprint 4 Deliverable: A refactored, stable, multi-tenant-ready application with a critical customer onboarding feature, and a clear path forward for Instagram integration.
+Demo Instagram: Showcase a full conversation happening on Instagram, flowing into the unified inbox and getting an AI reply.
+Demo AI Tagging: Show the "AI Tagging Rules" page. Add a new rule (e.g., keyword "bridal" -> tag "interest:bridal"). Start a new conversation on WhatsApp, use the word "bridal," and then show in the Inbox that the "interest:bridal" tag was automatically applied.
+Demo Proactive Features: Show a user abandoning a booking. Navigate to the "Scheduled Outreach" page and show the "LEAD_FOLLOWUP" task that was automatically created.
+Demo the Automation Tool: Run the pytest command in the terminal. The team will watch as the Selenium browser automatically opens, logs into the dashboard, and runs through the test cases, printing "PASSED" for each one. This is a powerful demonstration of the project's new stability and quality assurance.

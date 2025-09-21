@@ -1,3 +1,4 @@
+# src/routers/analytics_router.py
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..schemas import analytics_schemas
