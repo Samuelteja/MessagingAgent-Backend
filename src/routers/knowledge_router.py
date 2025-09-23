@@ -1,10 +1,11 @@
 # src/routers/knowledge_router.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
-from ..schemas import knowledge_schemas 
-from ..crud import crud_knowledge, crud_ai_tagging
+from ..schemas import knowledge_schemas
+from ..crud import crud_knowledge, crud_embedding
 from ..database import SessionLocal
+from .. import models
 
 router = APIRouter(
     prefix="/api",
@@ -20,12 +21,38 @@ def get_db():
         db.close()
 
 # --- Knowledge Endpoints ---
+
+def _run_knowledge_post_processing(item_ids: List[int]): # <-- Accepts a list of IDs
+    """
+    This background task for knowledge items now creates its own DB session.
+    """
+    print(f"🤖 Background Task: Starting post-processing for {len(item_ids)} knowledge item(s)...")
+    db = SessionLocal() # Create independent session
+    try:
+        knowledge_items = db.query(models.BusinessKnowledge).filter(models.BusinessKnowledge.id.in_(item_ids)).all()
+        qa_items_to_index = [item for item in knowledge_items if item.type == 'QA']
+        
+        if qa_items_to_index:
+            try:
+                print(f"   - Step 1: Generating Embeddings for {len(qa_items_to_index)} new Q&A item(s)...")
+                crud_embedding.generate_and_save_embeddings_for_qas(db, qa_items_to_index)
+                print("   - ✅ Embedding indexing for Q&A items completed successfully.")
+            except Exception as e:
+                print(f"   - ❌ ERROR during Q&A Embedding Indexing step: {e}")
+    finally:
+        db.close() # Always close the session
+        print("🤖 Background Task: Knowledge post-processing finished.")
+
 @router.post("/knowledge/", response_model=knowledge_schemas.BusinessKnowledge)
-def create_knowledge(item: knowledge_schemas.BusinessKnowledgeCreate, db: Session = Depends(get_db)):
-    db_item = crud_knowledge.get_knowledge_item_by_type_and_key(db, item_type=item.type, item_key=item.key)
-    if db_item:
-        raise HTTPException(status_code=400, detail="Item with this key already exists.")
-    return crud_knowledge.create_knowledge_item(db=db, item=item)
+def create_knowledge(
+    item: knowledge_schemas.BusinessKnowledgeCreate, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    db_item = crud_knowledge.create_knowledge_item(db=db, item=item)
+    background_tasks.add_task(_run_knowledge_post_processing, [db_item.id]) # Pass ID
+    return db_item
+
 
 @router.get("/knowledge/", response_model=List[knowledge_schemas.BusinessKnowledge])
 def read_knowledge(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -49,7 +76,7 @@ def read_hours(db: Session = Depends(get_db)):
     return crud_knowledge.get_business_hours(db)
 
 @router.post("/knowledge/bulk-upload", tags=["Business Knowledge"])
-def create_knowledge_bulk(items: List[knowledge_schemas.BusinessKnowledgeCreate], db: Session = Depends(get_db)):
+def create_knowledge_bulk(items: List[knowledge_schemas.BusinessKnowledgeCreate], background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Handles bulk creation of knowledge items.
     It now intelligently handles different types (MENU, QA) based on the payload.
@@ -66,8 +93,7 @@ def create_knowledge_bulk(items: List[knowledge_schemas.BusinessKnowledgeCreate]
         raise HTTPException(status_code=400, detail=f"Bulk upload for type '{item_type}' is not supported.")
 
     # We can reuse the existing crud function as it's already flexible enough.
-    count = crud_knowledge.bulk_create_knowledge_items(db=db, items=items)
-    
-    print(f"✅ Successfully bulk-inserted {count} items of type '{item_type}'.")
-    return {"status": "success", "items_created": count}
-
+    new_items = crud_knowledge.bulk_create_knowledge_items(db=db, items=items)
+    new_item_ids = [item.id for item in new_items]
+    background_tasks.add_task(_run_knowledge_post_processing, new_item_ids) # Pass IDs
+    return {"status": "success", "items_created": len(new_items)}

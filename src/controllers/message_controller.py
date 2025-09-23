@@ -49,24 +49,43 @@ def _act_on_ai_analysis(db: Session, contact: models.Contact, analysis: dict):
                 booking_datetime_str = f"{date_str} {time_str}"
                 booking_datetime = dateutil.parser.parse(booking_datetime_str)
 
-                # Create the booking in the database
-                new_booking = crud_booking.create_booking(
-                    db,
-                    contact_db_id=contact.id,
-                    service_name=service,
-                    booking_datetime=booking_datetime
-                )
+                most_recent_booking = crud_booking.get_most_recent_booking(db, contact.id)
+                
+                is_duplicate = False
+                if most_recent_booking:
+                    # 2. Check if the service is the same and it was created very recently.
+                    time_since_last_booking = datetime.now(timezone.utc) - most_recent_booking.created_at
+                    
+                    if (most_recent_booking.service_name.lower() == service.lower() and
+                        time_since_last_booking < timedelta(minutes=30)):
+                        is_duplicate = True
 
-                # Schedule the 24-hour reminder
-                reminder_time = booking_datetime - timedelta(hours=24)
-                reminder_content = f"Hi {contact.name or 'there'}! Just a friendly reminder about your appointment for a {service} tomorrow at {booking_datetime.strftime('%I:%M %p')}. We look forward to seeing you!"
-                crud_scheduler.create_scheduled_task(
-                    db,
-                    contact_id=contact.contact_id,
-                    task_type="APPOINTMENT_REMINDER",
-                    scheduled_time=reminder_time,
-                    content=reminder_content
-                )
+                if is_duplicate:
+                    print(f"   - ✅ Duplicate booking detected (same service within 30 mins). Skipping creation.")
+                else:
+                    new_booking = crud_booking.create_booking(
+                        db,
+                        contact_db_id=contact.id,
+                        service_name=service,
+                        booking_datetime=booking_datetime
+                    )
+
+                    existing_reminder = crud_scheduler.get_existing_reminder(db, contact_id=contact.contact_id, appointment_time=booking_datetime)
+                    
+                    if existing_reminder:
+                        print(f"   - ✅ Reminder already exists for this time slot (Task ID: {existing_reminder.id}). Skipping new reminder creation.")
+                    else:
+                        # 2. If no reminder exists, create one as normal.
+                        print("   - No existing reminder found. Scheduling a new one.")
+                        reminder_time = booking_datetime - timedelta(hours=24)
+                        reminder_content = f"Hi {contact.name or 'there'}! Just a friendly reminder about your appointment for a {service} tomorrow at {booking_datetime.strftime('%I:%M %p')}. We look forward to seeing you!"
+                        crud_scheduler.create_scheduled_task(
+                            db,
+                            contact_id=contact.contact_id,
+                            task_type="APPOINTMENT_REMINDER",
+                            scheduled_time=reminder_time,
+                            content=reminder_content
+                        )
             except dateutil.parser.ParserError as e:
                 print(f"   - ❌ Error parsing date/time from AI entities: {e}")
         else:

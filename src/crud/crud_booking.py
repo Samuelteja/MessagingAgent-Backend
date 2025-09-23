@@ -1,7 +1,7 @@
 # src/crud/crud_booking.py
 
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from .. import models
 from ..schemas import booking_schemas
 
@@ -23,3 +23,11 @@ def create_booking(db: Session, contact_db_id: int, service_name: str, booking_d
     
     print(f"   - Booking successfully created with ID: {db_booking.id}")
     return db_booking
+
+def get_most_recent_booking(db: Session, contact_db_id: int) -> models.Booking:
+    """
+    Fetches the single most recent booking for a contact, ordered by creation time.
+    """
+    return db.query(models.Booking).filter(
+        models.Booking.contact_db_id == contact_db_id
+    ).order_by(models.Booking.created_at.desc()).first()

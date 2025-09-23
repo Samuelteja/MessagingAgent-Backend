@@ -17,7 +17,9 @@ from .routers import (
     analytics_router,
     webhook_router,
     menu_router,
-    profile_router
+    profile_router,
+    scheduler_router,
+    test_helpers_router
 )
 
 Base.metadata.create_all(bind=engine)
@@ -51,7 +53,8 @@ app.include_router(campaign_router.router)
 app.include_router(analytics_router.router)
 app.include_router(menu_router.router)
 app.include_router(profile_router.router)
-
+app.include_router(scheduler_router.router)
+app.include_router(test_helpers_router.router)
 
 # ==============================================================================
 # --- Core App Endpoints (Non-API) ---

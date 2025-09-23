@@ -33,20 +33,26 @@ def update_tags_for_contact(db: Session, contact_id: str, tag_names: List[str]) 
     """
     # First, find the contact.
     contact = crud_contact.get_contact_by_contact_id(db, contact_id=contact_id)
-    if not contact:
-        return None
+    if not contact or not tag_names:
+        return contact
     
-    # Find all the Tag objects that match the provided names.
-    tags_to_assign = []
-    if tag_names:
-        tags_to_assign = db.query(models.Tag).filter(models.Tag.name.in_(tag_names)).all()
-    
-    # Directly assign the new list of tags to the contact's relationship.
-    # SQLAlchemy's relationship magic handles the association table updates.
-    contact.tags = tags_to_assign
+    existing_tag_names = {tag.name for tag in contact.tags}
+
+    new_tags_to_add_names = [name for name in tag_names if name not in existing_tag_names]
+
+    if not new_tags_to_add_names:
+        print(f"CRUD: No new tags to add for contact {contact_id}. All suggested tags already exist.")
+        return contact
+        
+    print(f"CRUD: Contact already has tags: {existing_tag_names}. Adding new tags: {new_tags_to_add_names}")
+
+    new_tags_to_assign = db.query(models.Tag).filter(models.Tag.name.in_(new_tags_to_add_names)).all()
+
+    contact.tags.extend(new_tags_to_assign)
     
     db.commit()
     db.refresh(contact)
     
-    print(f"CRUD: Successfully updated tags for contact {contact_id} with: {[t.name for t in contact.tags]}")
+    final_tags = [t.name for t in contact.tags]
+    print(f"CRUD: Successfully updated tags for contact {contact_id}. Final tags: {final_tags}")
     return contact

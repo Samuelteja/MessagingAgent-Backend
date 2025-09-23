@@ -28,11 +28,13 @@ def create_knowledge_item(db: Session, item: knowledge_schemas.BusinessKnowledge
     db.refresh(db_item)
     return db_item
 
-def bulk_create_knowledge_items(db: Session, items: List[knowledge_schemas.BusinessKnowledgeCreate]):
+def bulk_create_knowledge_items(db: Session, items: List[knowledge_schemas.BusinessKnowledgeCreate]) -> List[models.BusinessKnowledge]:
     db_items = [models.BusinessKnowledge(**item.dict()) for item in items]
-    db.bulk_save_objects(db_items)
+    db.add_all(db_items)
     db.commit()
-    return len(db_items)
+    for item in db_items:
+        db.refresh(item)
+    return db_items
 
 def get_staff_members(db: Session, skip: int = 0, limit: int = 50):
     return db.query(models.StaffRoster).offset(skip).limit(limit).all()

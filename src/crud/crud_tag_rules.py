@@ -49,7 +49,16 @@ def get_tag_rules(db: Session, skip: int = 0, limit: int = 200) -> List[models.T
     return (
         db.query(models.TagRule)
         .options(joinedload(models.TagRule.tag))
+        .order_by(models.TagRule.id.asc())
         .offset(skip)
         .limit(limit)
         .all()
     )
+
+def delete_tag_rule(db: Session, rule_id: int) -> models.TagRule:
+    """Deletes an AI tagging rule by its ID."""
+    db_rule = db.query(models.TagRule).filter(models.TagRule.id == rule_id).first()
+    if db_rule:
+        db.delete(db_rule)
+        db.commit()
+    return db_rule

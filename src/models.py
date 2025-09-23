@@ -81,6 +81,7 @@ class BusinessKnowledge(Base):
     type = Column(String, index=True, nullable=False) # The type of knowledge, e.g., 'QA', 'MENU', 'UPSELL'
     key = Column(String, nullable=False) # The question or menu item, e.g., "Do you have parking?", "Classic Haircut"
     value = Column(String, nullable=False) # The answer or price/details, e.g., "Yes, we have free parking.", "{"price": 500, "duration": 30}"
+    embedding = Column(JSON, nullable=True)
     __table_args__ = (UniqueConstraint('type', 'key', name='_type_key_uc'),)
 
 class StaffRoster(Base):
@@ -119,9 +120,7 @@ class MenuItem(Base):
     category = Column(String, nullable=False, index=True)
     price = Column(Float, nullable=False)
     description = Column(Text, nullable=True)
-
-    # This relationship is what was causing the error.
-    # We are now explicitly telling it which foreign key to use.
+    embedding = Column(JSON, nullable=True)
     upsell_rule = relationship(
         "UpsellRule", 
         back_populates="trigger_service", 

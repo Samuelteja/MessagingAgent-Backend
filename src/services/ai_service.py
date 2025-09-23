@@ -9,6 +9,7 @@ import google.generativeai as genai
 from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
+from . import context_retriever
 from .. import models
 from ..crud import crud_profile, crud_knowledge, crud_menu, crud_tag
 
@@ -25,7 +26,8 @@ genai.configure(api_key=api_key)
 
 
 SYSTEM_INSTRUCTION_TEMPLATE = """
-You are a friendly, human-like, and highly efficient AI assistant for "{business_name}". Your primary goal is to understand a user's request, extract key information using the provided context, and suggest a reply.
+You are a friendly, human-like, and highly efficient AI assistant for "{business_name}". 
+Your primary goal is to use the **STRICTLY PROVIDED CONTEXT** to answer the user's question and guide them towards booking an appointment.
 Business Overview: {business_description}
 
 **SESSION CONTEXT (Information about THIS specific conversation):**
@@ -33,8 +35,8 @@ Business Overview: {business_description}
 - {customer_context_string}
 - **PRE-ANALYZED TAGS:** Our system has pre-scanned the user's message and suggests that the following tags may be relevant. If you agree with this analysis based on the full conversation, please include them in your 'tags' array output: **{list_of_relevant_tags}**
 
-**BUSINESS CONTEXT (Permanent facts about the salon that you MUST use):**
-{business_context}
+**RETRIEVED KNOWLEDGE BASE CONTEXT (You MUST use this to answer questions):**
+{retrieved_context}
 
 **YOUR TASK:**
 Analyze the user's message in the context of the conversation history AND the business context provided above. Respond ONLY with a single, valid JSON object. Do not add any text before or after the JSON.
@@ -187,37 +189,38 @@ def analyze_message(
     """
     Generates a reply using the Gemini model, now including BOTH business AND customer context.
     """
+    
     try:
+        last_user_message = chat_history[-1]['parts'][0] if chat_history else ""
+        retrieved_context_str = context_retriever.find_relevant_context(last_user_message, db)
+    
         # --- Step 1: Fetch dynamic business context (unchanged) ---
         print("🏢 Fetching business profile from database...")
         profile = crud_profile.get_profile(db)
         business_name = profile.business_name
         business_description = profile.business_description
-        business_context_str = _get_business_context(db)
         
         # --- Step 2: Build the NEW Dynamic Customer Context String ---
         customer_context_string = ""
         if is_new_interaction:
             if is_new_customer:
-                # First message of a chat AND we don't know their name.
                 customer_context_string = "Customer Status: This is a NEW_CUSTOMER."
             else:
-                # First message of a chat AND we DO know their name.
                 customer_context_string = f'Customer Status: This is a RETURNING_CUSTOMER named "{db_contact.name}".'
         else:
-            # It's an ongoing conversation, no special greeting needed.
             customer_context_string = f'Customer Status: This is an ongoing conversation with "{db_contact.name or "the user"}".'
 
         # --- Step 3: Prepare the full, merged system instruction ---
         print(f"🤖 Building prompt with customer context: '{customer_context_string}'")
         today_str = datetime.now().strftime("%A, %B %d, %Y")
+
         system_instruction = SYSTEM_INSTRUCTION_TEMPLATE.format(
             business_name=business_name,
             business_description=business_description,
             current_date=today_str,
             customer_context_string=customer_context_string,
             list_of_relevant_tags=str(relevant_tags) if relevant_tags else "[]",
-            business_context=business_context_str
+            retrieved_context=retrieved_context_str
         )
 
         # --- Step 4: Call the Gemini API (unchanged) ---
@@ -231,8 +234,6 @@ def analyze_message(
         response = model.generate_content(chat_history, generation_config=generation_config)
         
         # =========================================================================
-        # --- THIS IS THE CRITICAL FIX ---
-        # Before we do anything else, check if the response was blocked.
         if not response.candidates:
             # This happens if the prompt itself was blocked by safety filters.
             print("❌ Gemini response was blocked. No candidates returned.")
