@@ -8,6 +8,8 @@ from typing import Optional
 from ..database import SessionLocal
 from ..services import whatsapp_service
 from ..crud import crud_contact
+from ..controllers import message_controller
+from ..schemas.webhook_schemas import NormalizedMessage
 
 # --- Pydantic Schemas for our Test Payloads ---
 
@@ -18,6 +20,7 @@ class SendMessagePayload(BaseModel):
 class LastMessageResponse(BaseModel):
     outgoing_text: Optional[str] = None
     timestamp: Optional[str] = None
+    outcome: Optional[str] = None
 
 
 # --- Router Setup ---
@@ -71,9 +74,30 @@ def get_last_message(contact_id: str, db: Session = Depends(get_db)):
     last_conversation = crud_contact.get_last_conversation(db, contact_id=contact_id)
     
     if not last_conversation:
-        raise HTTPException(status_code=404, detail="No conversation history found for this contact.")
+        return LastMessageResponse(outgoing_text=None, timestamp=None, outcome=None)
         
     return LastMessageResponse(
         outgoing_text=last_conversation.outgoing_text,
-        timestamp=str(last_conversation.timestamp)
+        timestamp=str(last_conversation.timestamp),
+        outcome=last_conversation.outcome
     )
+
+@router.post("/simulate-incoming-message")
+async def simulate_incoming_message(payload: SendMessagePayload, db: Session = Depends(get_db)):
+    """
+    Receives a simulated message payload and injects it directly into the
+    message processing pipeline, bypassing the need for a live WPPConnect webhook.
+    """
+    print("<<<<< SIMULATING INCOMING MESSAGE via Test Helper >>>>>")
+    # Set a default event type if not provided, as this is what the controller expects
+    normalized_message = NormalizedMessage(
+        channel="WhatsApp",
+        contact_id=payload.contact_id,
+        pushname="Test User", # A sensible default for a test
+        body=payload.message
+    )
+    
+    # The core logic is to simply call the same controller function the real webhook would
+    await message_controller.process_incoming_message(normalized_message, db)
+    
+    return {"status": "ok", "message": "Simulated message injected into the pipeline."}

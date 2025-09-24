@@ -116,22 +116,31 @@ def get_last_conversation(db: Session, contact_id: str):
         .first()
     )
 
-def log_conversation(db: Session, channel: str, contact_db_id: int, incoming_text: str, outgoing_text: Optional[str], status: str):
+def log_conversation(
+    db: Session, 
+    channel: str, 
+    contact_db_id: int, 
+    incoming_text: str, 
+    outgoing_text: Optional[str], 
+    status: str,
+    outcome: str # <-- It now requires the outcome to be passed in
+) -> models.Conversation:
     """
-    MODIFIED: Logs a full conversation exchange to the database.
-    It now takes contact_db_id (the integer PK) instead of the string.
+    SIMPLIFIED: Logs a full conversation exchange to the database.
+    It now requires the controller to provide the correct outcome.
     """
     db_conversation = models.Conversation(
         channel=channel,
-        contact_db_id=contact_db_id, # Use the foreign key
+        contact_db_id=contact_db_id,
         incoming_text=incoming_text,
         outgoing_text=outgoing_text,
-        status=status
+        status=status,
+        outcome=outcome # <-- Use the outcome provided by the controller
     )
     db.add(db_conversation)
     db.commit()
     db.refresh(db_conversation)
-    print(f"Conversation for contact ID {contact_db_id} logged to database.")
+    print(f"Conversation logged for contact ID {contact_db_id} with outcome '{outcome}'.")
     return db_conversation
 
 def set_ai_pause(db: Session, contact_id: str, minutes: int = 720): # Default to 12 hours

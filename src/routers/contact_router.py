@@ -123,3 +123,15 @@ def read_all_contacts(skip: int = 0, limit: int = 100, db: Session = Depends(get
     """Retrieves a paginated list of all contacts in the database."""
     contacts = crud_contact.get_all_contacts(db, skip=skip, limit=limit)
     return contacts
+
+@router.get("/{contact_id:path}/details", response_model=contact_schemas.Contact, summary="Get Full Details for a Single Contact")
+def read_contact_details(contact_id: str, db: Session = Depends(get_db)):
+    """
+    Retrieves the full profile for a single contact, including their name,
+    confirmation status, and all associated tags. Essential for E2E testing.
+    """
+
+    contact = crud_contact.get_contact_by_contact_id(db, contact_id=contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return contact

@@ -19,6 +19,7 @@ from .routers import (
     menu_router,
     profile_router,
     scheduler_router,
+    bookings_router,
     test_helpers_router
 )
 
@@ -54,6 +55,7 @@ app.include_router(analytics_router.router)
 app.include_router(menu_router.router)
 app.include_router(profile_router.router)
 app.include_router(scheduler_router.router)
+app.include_router(bookings_router.router)
 app.include_router(test_helpers_router.router)
 
 # ==============================================================================

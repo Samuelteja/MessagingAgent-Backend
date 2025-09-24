@@ -15,7 +15,8 @@ class ContactCreate(ContactBase):
 class Contact(ContactBase):
     id: int
     created_at: datetime
-    
+    is_name_confirmed: bool
+    ai_is_paused_until: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
     tags: List[Tag] = []
 

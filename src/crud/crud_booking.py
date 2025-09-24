@@ -1,9 +1,10 @@
 # src/crud/crud_booking.py
 
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from .. import models
 from ..schemas import booking_schemas
+from typing import List
 
 def create_booking(db: Session, contact_db_id: int, service_name: str, booking_datetime: datetime) -> models.Booking:
     """
@@ -31,3 +32,32 @@ def get_most_recent_booking(db: Session, contact_db_id: int) -> models.Booking:
     return db.query(models.Booking).filter(
         models.Booking.contact_db_id == contact_db_id
     ).order_by(models.Booking.created_at.desc()).first()
+
+def get_bookings_by_contact_id(db: Session, contact_db_id: int) -> List[models.Booking]:
+    """
+    Fetches all booking records for a specific contact, ordered by the
+    booking time.
+    """
+    return (
+        db.query(models.Booking)
+        .filter(models.Booking.contact_db_id == contact_db_id)
+        .order_by(models.Booking.booking_datetime.asc())
+        .all()
+    )
+
+def get_recent_and_upcoming_bookings(db: Session, contact_db_id: int) -> List[models.Booking]:
+    """
+    Fetches all bookings for a contact that are either in the future or were
+    booked in the last 7 days. This provides context for the AI.
+    """
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    
+    return (
+        db.query(models.Booking)
+        .filter(
+            models.Booking.contact_db_id == contact_db_id,
+            models.Booking.booking_datetime >= seven_days_ago # Only fetch recent/future bookings
+        )
+        .order_by(models.Booking.booking_datetime.asc())
+        .all()
+    )

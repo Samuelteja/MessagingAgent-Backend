@@ -1,0 +1,3 @@
+shoudl ask for name for new customer 
+make sure booking intent is identified properly to prepare schedules 
+OUTCOME handling is not correct 
