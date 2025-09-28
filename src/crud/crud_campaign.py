@@ -6,6 +6,7 @@ from sqlalchemy import func, cast, Date, case
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from .. import models
+from .crud_contact import get_last_conversation
 
 # ==============================================================================
 # --- NEW: Campaign CRUD Functions ---

@@ -97,3 +97,9 @@ def create_knowledge_bulk(items: List[knowledge_schemas.BusinessKnowledgeCreate]
     new_item_ids = [item.id for item in new_items]
     background_tasks.add_task(_run_knowledge_post_processing, new_item_ids) # Pass IDs
     return {"status": "success", "items_created": len(new_items)}
+
+
+@router.get("/staff/for-dropdown", response_model=List[knowledge_schemas.StaffDropdown], summary="Get Staff for Dropdowns")
+def read_staff_for_dropdown(db: Session = Depends(get_db)):
+    """Returns a lightweight list of staff members for UI dropdowns."""
+    return [{"id": member.id, "name": member.name} for member in crud_knowledge.get_staff_members(db)]

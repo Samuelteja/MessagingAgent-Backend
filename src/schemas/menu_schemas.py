@@ -33,3 +33,10 @@ class MenuItem(MenuItemBase):
 
     class Config:
         orm_mode = True
+
+class MenuItemDropdown(BaseModel):
+    id: int
+    name: str
+
+class MenuItemUpdate(MenuItemBase):
+    pass

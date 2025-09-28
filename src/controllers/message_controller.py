@@ -7,7 +7,13 @@ from .. import schemas, crud, models
 from ..services import ai_service, whatsapp_service, tag_pre_scanner
 import time
 import random
-from datetime import datetime, time as time_obj, timezone
+from datetime import datetime, time as time_obj, timezone, timedelta
+from ..events.event_bus import dispatch
+from ..events.event_types import (
+    BaseEvent, InquiryEvent, GreetingEvent, NameCaptureEvent,
+    BookingConfirmationRequestEvent, BookingCreationEvent, BookingAbandonedEvent, HandoffEvent,
+    BookingUpdateEvent
+)
 from typing import Tuple
 from ..services.websocket_manager import manager
 from ..crud import crud_analytics, crud_campaign, crud_contact, crud_knowledge, crud_tag, crud_booking, crud_scheduler
@@ -19,9 +25,13 @@ MAX_DELAY_SECONDS = 10.0
 CHARS_PER_SECOND_FACTOR = 35
 
 OUTCOME_HIERARCHY = {
-    "pending": 0, "unclear": 1, "greeting": 2, "name_provided": 2,
-    "inquiry": 3, "booking_incomplete": 4, "request_confirmation": 5,
-    "booking_abandoned": 5, "human_handoff": 6, "booking_confirmed": 7,
+    "pending": 0, "unclear": 1, "answer_inquiry": 2,
+    "capture_customer_name": 2, # Capture name is also a simple step
+    "schedule_lead_follow_up": 3, # <-- GIVE THIS A PROPER VALUE
+    "request_booking_confirmation": 5,
+    "handoff_to_human": 6,
+    "create_booking": 7,
+    "booking_confirmed": 7,
 }
 CONVERSATION_RESET_THRESHOLD = timedelta(hours=48)
 
@@ -33,11 +43,6 @@ def _act_on_ai_analysis(db: Session, contact: models.Contact, final_outcome: str
     """
     Handles the CONSEQUENCES of the AI's analysis based on the final,
     determined outcome from the state machine.
-
-    This function is responsible for:
-    - Applying tags to the contact.
-    - Creating bookings in the database.
-    - Scheduling follow-up tasks or reminders.
     """
     print(f"🤖 Acting on final determined outcome: '{final_outcome}'")
     entities = analysis.get("entities", {})
@@ -45,12 +50,9 @@ def _act_on_ai_analysis(db: Session, contact: models.Contact, final_outcome: str
     # --- 1. APPLY TAGS (Works for any outcome) ---
     tag_names = analysis.get("tags", [])
     if tag_names:
-        print(f"   - AI suggested tags: {tag_names}. Applying to contact {contact.contact_id}...")
-        # This function correctly appends and avoids duplicates
         crud_tag.update_tags_for_contact(db, contact_id=contact.contact_id, tag_names=tag_names)
 
     # --- 2. HANDLE BOOKING & REMINDER CREATION ---
-    # This block only runs if the final state is a booking confirmation.
     if final_outcome in ["booking_confirmed", "book_appointment"]:
         print(f"   - Processing booking based on outcome '{final_outcome}'...")
         service = entities.get("service")
@@ -61,32 +63,12 @@ def _act_on_ai_analysis(db: Session, contact: models.Contact, final_outcome: str
             try:
                 booking_datetime_str = f"{date_str} {time_str}"
                 booking_datetime = dateutil.parser.parse(booking_datetime_str)
-
-                # Recency check to prevent creating duplicate bookings in rapid succession
-                most_recent_booking = crud_booking.get_most_recent_booking(db, contact.id)
-                is_duplicate = False
-                if most_recent_booking:
-                    created_at = most_recent_booking.created_at
-                    if created_at.tzinfo is None:  # naive datetime
-                        created_at = created_at.replace(tzinfo=timezone.utc)
-                    time_since = datetime.now(timezone.utc) - created_at
-                    if most_recent_booking.service_name.lower() == service.lower() and time_since < timedelta(minutes=5):
-                        is_duplicate = True
-                
-                if is_duplicate:
-                    print("   - ✅ Duplicate booking detected (same service < 5 mins). Skipping creation.")
-                else:
-                    crud_booking.create_booking(db, contact.id, service, booking_datetime)
-                    
-                    # Check for and schedule reminders
-                    existing_reminder = crud_scheduler.get_existing_reminder(db, contact.contact_id, booking_datetime)
-                    if not existing_reminder:
-                        print("   - Scheduling a new appointment reminder.")
-                        reminder_time = booking_datetime - timedelta(hours=24)
-                        reminder_content = f"Hi {contact.name or 'there'}! Just a friendly reminder about your appointment for a {service} tomorrow at {booking_datetime.strftime('%I:%M %p')}. We look forward to seeing you!"
-                        crud_scheduler.create_scheduled_task(db, contact.contact_id, "APPOINTMENT_REMINDER", reminder_time, reminder_content)
-                    else:
-                        print("   - ✅ Reminder already exists for this time slot. Skipping.")
+                crud_booking.create_booking(db, contact.id, service, booking_datetime)
+                existing_reminder = crud_scheduler.get_existing_reminder(db, contact.contact_id, booking_datetime)
+                if not existing_reminder:
+                    reminder_time = booking_datetime - timedelta(hours=24)
+                    reminder_content = f"Hi {contact.name or 'there'}! Reminder for your {service} appointment tomorrow at {booking_datetime.strftime('%I:%M %p')}."
+                    crud_scheduler.create_scheduled_task(db, contact.contact_id, "APPOINTMENT_REMINDER", reminder_time, reminder_content)
 
             except dateutil.parser.ParserError as e:
                 print(f"   - ❌ Error parsing date/time from AI entities: {e}")
@@ -168,57 +150,6 @@ def get_business_status(db: Session) -> Tuple[str, str]:
     return ("CLOSED_AWAKE", off_hours_msg)
 
 # ==============================================================================
-# --- STAGE 4: DATABASE UPDATE LOGIC (UNCHANGED) ---
-# ==============================================================================
-# def update_conversation_with_ai_analysis(db: Session, conversation: models.Conversation, analysis: dict):
-    # --- THIS SECTION IS MODIFIED with the "Stuck Conversation" bug fix ---
-#     intent = analysis.get("intent")
-    
-    # 1. Update the outcome - with the bug fix
-#     if intent in ["BOOKING_CONFIRMED", "HUMAN_HANDOFF"]:
-        # --- REFACTOR ---: The "Stuck Conversation" Bug Fix
-        # Only update the outcome if the current state is not already 'booking_confirmed'.
-#         if conversation.outcome != 'booking_confirmed':
-#             conversation.outcome = intent.lower()
-#         else:
-#             print("INFO: Ignored outcome update because conversation is already confirmed.")
-        
-        # 2. Automatically create and assign an outcome tag (logic is the same)
-#         outcome_tag_name = f"outcome:{intent.lower()}"
-#         tag = crud_tag.get_tag_by_name(db, name=outcome_tag_name)
-#       if not tag:
-#              tag = crud_tag.create_tag(db, schemas.TagCreate(name=outcome_tag_name))
-#
-#         if tag not in conversation.tags:
-#             conversation.tags.append(tag)
-#             print(f"✅ Automatically assigned tag: '{outcome_tag_name}'")
-
-#     tag_names = analysis.get("tags", [])
-#     if tag_names:
-#         contact = conversation.contact
-#         print(f"   - AI suggested tags: {tag_names}. Applying to contact {contact.contact_id}...")
-#         existing_tag_names = {tag.name for tag in contact.tags}
-        
-#         new_tags_to_add = []
-#         for tag_name in tag_names:
-#             if tag_name not in existing_tag_names:
- #                tag = crud_tag.get_tag_by_name(db, name=tag_name)
-#                 if tag:
- #                    new_tags_to_add.append(tag)
-        
-#         if new_tags_to_add:
-#             contact.tags.extend(new_tags_to_add)
-#             print(f"✅ AI suggested new tags for contact {contact.contact_id}: {[t.name for t in new_tags_to_add]}")
-    
-#     if intent == "HUMAN_HANDOFF":
-#         print(f"🤖 Intent is HUMAN_HANDOFF. Automatically pausing AI for contact {conversation.contact.contact_id}")
-        # We reuse the existing CRUD function to set the pause.
-        # The default pause is 12 hours, giving the owner plenty of time to respond.
- #        crud_contact.set_ai_pause(db, contact_id=conversation.contact.contact_id)
-        
- #    db.commit()
-
-# ==============================================================================
 # --- THE NEW, FULLY REFACTORED MAIN CONTROLLER ---
 # ==============================================================================
 async def process_incoming_message(message: webhook_schemas.NormalizedMessage, db: Session):
@@ -231,17 +162,21 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     message_body = message.body
     channel = message.channel
 
-    print(f"\n--- New [{channel}] Message Pipeline Started for '{message.pushname or sender_number}' ---")
-    
     contact = crud_contact.get_or_create_contact(db, contact_id=sender_number, pushname=message.pushname)
-    if contact.ai_is_paused_until and contact.ai_is_paused_until > datetime.now(timezone.utc):
-        print(f"-> AI is manually paused for {contact.contact_id}. Ignoring message.")
-        # We still log the incoming message for the owner to see in the inbox
-        crud_contact.log_conversation(db, channel, contact.id, message_body, None, "received_ignored_ai_paused", "pending")
-        await manager.broadcast({"type": "new_message", "contact_id": contact.contact_id})
-        return
+    if contact.ai_is_paused_until:
+        pause_timestamp = contact.ai_is_paused_until
+        
+        # Make the timestamp from the DB "aware" of the UTC timezone
+        if pause_timestamp.tzinfo is None:
+            pause_timestamp = pause_timestamp.replace(tzinfo=timezone.utc)
+        
+        # Now, the comparison is safe and correct
+        if pause_timestamp > datetime.now(timezone.utc):
+            print(f"-> AI is manually paused for {contact.contact_id}. Ignoring message.")
+            crud_contact.log_conversation(db, message.channel, contact.id, message.body, None, "received_ignored_ai_paused", "pending")
+            await manager.broadcast({"type": "new_message", "contact_id": contact.contact_id})
+            return
     
-    # Notify the live dashboard that a new message has arrived
     await manager.broadcast({"type": "new_message", "contact_id": contact.contact_id})
 
     status, off_hours_message = get_business_status(db)
@@ -298,29 +233,35 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     current_outcome = "pending"
     if last_convo:
         ts = last_convo.timestamp
-        if ts.tzinfo is None:  # naive datetime
+        if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
 
         time_since = datetime.now(timezone.utc) - ts
         if time_since < CONVERSATION_RESET_THRESHOLD:
             current_outcome = last_convo.outcome
     db_history = crud_contact.get_chat_history(db, contact_id=sender_number, limit=10)
-    is_new_customer_for_ai = not contact.is_name_confirmed
-    is_new_interaction = len(db_history) <= 1
-
-
+    
     # Fetch recent booking history for context
     recent_bookings = crud_booking.get_recent_and_upcoming_bookings(db, contact.id)
     booking_history_context = "  - This customer has no recent or upcoming appointments."
+    is_potential_duplicate = False
     if recent_bookings:
         formatted_bookings = [
             f"  - {b.service_name} on {b.booking_datetime.strftime('%A, %B %d')} at {b.booking_datetime.strftime('%I:%M %p')}"
             for b in recent_bookings
         ]
-        booking_history_context = "\n".join(formatted_bookings)
-    print(f"=> STAGE 2 [{channel}]: Preparing context. New customer for AI? {is_new_customer_for_ai}. New interaction? {is_new_interaction}.")
+        booking_history_context = "This customer has the following recent or upcoming appointments:\n" + "\n".join(formatted_bookings)
+        for booking in recent_bookings:
+            if booking.service_name.lower() in message_body.lower():
+                is_potential_duplicate = True
+                print("   - POTENTIAL DUPLICATE DETECTED by backend pre-check.")
+                break
+    # print(f"=> STAGE 2 [{channel}]: Preparing context. New customer for AI? {is_new_customer_for_ai}. New interaction? {is_new_interaction}.")
     # =========================================================================
     
+    is_new_customer_for_ai = not contact.is_name_confirmed
+    is_new_interaction = len(db_history) == 0
+
     gemini_history = []
     for msg in reversed(db_history):
         gemini_history.append({'role': 'user', 'parts': [msg.incoming_text]})
@@ -334,65 +275,117 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
         whatsapp_service.set_typing(sender_number, True)
     
     relevant_tags = tag_pre_scanner.find_relevant_tags(message_body, db)
-    analysis = ai_service.analyze_message(
+    command = ai_service.analyze_message(
         chat_history=gemini_history, 
         db=db, 
         db_contact=contact,
         is_new_customer=is_new_customer_for_ai,
         is_new_interaction=is_new_interaction,
         relevant_tags=relevant_tags,
-        booking_history_context=booking_history_context
+        booking_history_context=booking_history_context,
+        is_potential_duplicate=is_potential_duplicate
     )
     
-    ai_reply = analysis.get("reply", "I'm having a little trouble with that request. I've notified our Salon Manager, and they will get back to you here shortly. Thanks for your patience!")
-    
-    
-    # --- STAGE 4: LOG & UPDATE DATABASE ---
-    print(f"=> STAGE 4 [{channel}]: Applying state machine logic...")
-    
-    # 1. Compare current state with AI's new intent
-    new_intent_from_ai = analysis.get("intent", "unclear").lower()
-    current_value = OUTCOME_HIERARCHY.get(current_outcome, 0)
-    new_value = OUTCOME_HIERARCHY.get(new_intent_from_ai, 0)
+    if not command:
+        command = {"name": "handoff_to_human", "args": {"reason": "AI failed to select a tool."}}
 
-    # 2. Determine the final outcome for this new conversation entry
-    final_outcome = current_outcome
-    if new_value > current_value:
-        final_outcome = new_intent_from_ai
-        print(f"   - State UPGRADE: From '{current_outcome}' -> '{final_outcome}'.")
+    function_name = command["name"]
+    function_args = command["args"]
+    print(f"=> STAGE 4: AI returned tool '{function_name}'. Dispatching event...")
+    
+    analysis_payload = {"action_params": function_args}
+    event = None
+    if function_name == "create_booking":
+        event = BookingCreationEvent(contact=contact, db_session=db, analysis=analysis_payload)
+        dispatch(event)
+    elif function_name == "update_booking":
+        event = BookingUpdateEvent(contact=contact, db_session=db, analysis=analysis_payload)
+        dispatch(event)
+    elif function_name == "request_booking_confirmation":
+        event = BookingConfirmationRequestEvent(contact=contact, db_session=db, analysis=analysis_payload)
+        dispatch(event)
+    elif function_name == "schedule_lead_follow_up":
+        event = BookingAbandonedEvent(contact=contact, db_session=db, analysis=analysis_payload)
+        dispatch(event)
+    elif function_name == "handoff_to_human":
+        event = HandoffEvent(contact=contact, db_session=db, analysis=analysis_payload)
+        dispatch(event)
+    elif function_name == "capture_customer_name":
+        event = NameCaptureEvent(contact=contact, db_session=db, analysis=analysis_payload)
+        dispatch(event)
     else:
-        print(f"   - State HELD: Current '{current_outcome}' is >= new intent '{new_intent_from_ai}'.")
+        event = InquiryEvent(contact=contact, db_session=db, analysis=analysis_payload)
+        dispatch(event)
 
-    # 3. Log the conversation WITH the final, correct outcome
-    new_conversation = crud_contact.log_conversation(
-        db=db, channel=channel, contact_db_id=contact.id,
-        incoming_text=message_body, outgoing_text=ai_reply,
-        status="replied", outcome=final_outcome
+
+    final_reply = event.final_reply or "I'm sorry, I seem to be having a technical issue. A team member will be with you shortly."
+
+    if event.stop_processing:
+        # If the pipeline was stopped (e.g., by a booking conflict), the final_reply was set by the listener.
+        final_reply = event.final_reply
+    else:
+        # If the pipeline succeeded, we generate the reply based on the action
+        if function_name == "create_booking":
+            final_reply = "Great, your appointment is confirmed! We look forward to seeing you."
+        elif function_name == "handoff_to_human":
+            final_reply = "That's a good question. I'm connecting you with our Salon Manager now, they will reply here shortly. 😊"
+        else: # For all other cases (inquiry, greeting, name capture etc.)
+            final_reply = function_args.get('reply_suggestion', final_reply)
+
+    new_outcome = function_name.lower()
+
+    is_duplicate_inquiry = (
+        current_outcome == 'booking_confirmed' and 
+        new_outcome == 'answer_inquiry' and 
+        is_potential_duplicate # The flag we set earlier
+    )
+
+    is_fresh_conversation = False
+    if last_convo:
+        ts = last_convo.timestamp
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - ts) < CONVERSATION_RESET_THRESHOLD:
+            is_fresh_conversation = True
+            
+    if is_fresh_conversation and current_outcome in ['booking_confirmed', 'human_handoff'] and not is_duplicate_inquiry:
+        final_outcome = current_outcome
+        print(f"   - State LOCKED: Fresh, resolved conversation. State remains '{final_outcome}'.")
+    else:
+        final_outcome = new_outcome
+        print(f"   - State Update: New or stale conversation. State is now '{final_outcome}'.")
+    
+    if final_outcome == 'create_booking':
+        final_outcome = 'booking_confirmed'
+    elif final_outcome == 'request_booking_confirmation':
+        final_outcome = 'request_confirmation'
+
+    print(f"=> STAGE 5: Logging final outcome '{final_outcome}' and sending reply.")
+
+    # Log the full exchange with the FINAL reply generated by our system.
+    crud_contact.log_conversation(
+        db=db,
+        channel=message.channel,
+        contact_db_id=contact.id,
+        incoming_text=message.body,
+        outgoing_text=final_reply,
+        status="replied",
+        outcome=final_outcome
     )
     
-    # 4. Act on the consequences of the final outcome by calling our helper
-    _act_on_ai_analysis(db, contact, final_outcome, analysis)
-
-    extracted_name = analysis.get("entities", {}).get("customer_name")
-    if not contact.is_name_confirmed and extracted_name:
-        crud_contact.update_contact_name(db, contact_id=sender_number, new_name=extracted_name)
-    
-    db.commit() # The single, final commit for the entire transaction.
-    print(f"=> STAGE 5 [{channel}]: All DB changes committed. Sending reply...")
+    db.commit()
 
     # --- STAGE 5: SEND REPLY ---
     print(f"=> STAGE 5 [{channel}]: Sending reply...")
-    calculated_delay = len(ai_reply) / CHARS_PER_SECOND_FACTOR
+    calculated_delay = len(final_reply) / CHARS_PER_SECOND_FACTOR
     final_delay = max(MIN_DELAY_SECONDS, min(calculated_delay, MAX_DELAY_SECONDS))
     final_delay += random.uniform(-0.5, 0.5)
 
-    print(f"   - AI Reply Length: {len(ai_reply)} chars. Calculated delay: {final_delay:.2f} seconds.")
+    print(f"   - AI Reply Length: {len(final_reply)} chars. Calculated delay: {final_delay:.2f} seconds.")
     await asyncio.sleep(final_delay)
     
-    # This section will be replaced by a unified notification_service on Day 4.
-    # For today's deliverable, this is correct.
     if channel == "WhatsApp":
-        whatsapp_service.send_reply(phone_number=sender_number, message=ai_reply)
+        whatsapp_service.send_reply(phone_number=sender_number, message=final_reply)
         whatsapp_service.set_typing(sender_number, False)
         
     print(f"--- Pipeline Finished for [{channel}] ---\n")

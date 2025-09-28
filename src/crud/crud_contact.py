@@ -138,8 +138,8 @@ def log_conversation(
         outcome=outcome # <-- Use the outcome provided by the controller
     )
     db.add(db_conversation)
-    db.commit()
-    db.refresh(db_conversation)
+    # db.commit()
+    # db.refresh(db_conversation)
     print(f"Conversation logged for contact ID {contact_db_id} with outcome '{outcome}'.")
     return db_conversation
 

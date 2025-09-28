@@ -46,13 +46,16 @@ def update_tags_for_contact(db: Session, contact_id: str, tag_names: List[str]) 
         
     print(f"CRUD: Contact already has tags: {existing_tag_names}. Adding new tags: {new_tags_to_add_names}")
 
-    new_tags_to_assign = db.query(models.Tag).filter(models.Tag.name.in_(new_tags_to_add_names)).all()
-
-    contact.tags.extend(new_tags_to_assign)
+    for tag_name in new_tags_to_add_names:
+        tag = get_tag_by_name(db, name=tag_name)
+        if not tag:
+            # If the AI suggests a tag that doesn't exist, we create it on the fly.
+            print(f"   -> Tag '{tag_name}' not found. Creating it now.")
+            tag = create_tag(db, tag_schemas.TagCreate(name=tag_name))
+        
+        # Append the persistent Tag object to the contact's relationship.
+        contact.tags.append(tag)
     
-    db.commit()
-    db.refresh(contact)
-    
-    final_tags = [t.name for t in contact.tags]
-    print(f"CRUD: Successfully updated tags for contact {contact_id}. Final tags: {final_tags}")
+    final_tags_in_session = [t.name for t in contact.tags]
+    print(f"CRUD: Staged tag updates for contact {contact_id}. Session now contains tags: {final_tags_in_session}")
     return contact

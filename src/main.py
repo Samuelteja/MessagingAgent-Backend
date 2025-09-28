@@ -20,12 +20,17 @@ from .routers import (
     profile_router,
     scheduler_router,
     bookings_router,
+    delivery_router,
     test_helpers_router
 )
+
+from .events import register_all_listeners
 
 Base.metadata.create_all(bind=engine)
 
 scheduler_service.initialize_scheduler()
+
+register_all_listeners()
 
 app = FastAPI(
     title="AI Messaging Assistant API",
@@ -56,6 +61,7 @@ app.include_router(menu_router.router)
 app.include_router(profile_router.router)
 app.include_router(scheduler_router.router)
 app.include_router(bookings_router.router)
+app.include_router(delivery_router.router)
 app.include_router(test_helpers_router.router)
 
 # ==============================================================================

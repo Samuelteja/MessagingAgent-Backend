@@ -1,5 +1,5 @@
 # src/models.py
-from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime, Time, JSON, Table, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime, Time, JSON, Table, ForeignKey, UniqueConstraint, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -150,13 +150,12 @@ class UpsellRule(Base):
     
 class BusinessProfile(Base):
     __tablename__ = "business_profile"
-
     id = Column(Integer, primary_key=True, index=True)
-    
-    business_name = Column(String, nullable=False, default="My Salon")
+    business_name = Column(String, nullable=False, default="My Business")
     business_description = Column(Text, nullable=True)
     address = Column(String, nullable=True)
     phone_number = Column(String, nullable=True)
+    business_type = Column(String, nullable=False, default="SALON") # Can be 'SALON' or 'GAS_DISTRIBUTOR'
 
 class TagRule(Base):
     """
@@ -183,9 +182,41 @@ class Booking(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     contact_db_id = Column(Integer, ForeignKey('contacts.id'), nullable=False)
-    service_name = Column(String, nullable=False)
+    staff_db_id = Column(Integer, ForeignKey('staff_roster.id'), nullable=True)
+    service_id = Column(Integer, ForeignKey('menu_items.id'), nullable=True)
+    service_name_text = Column(String, nullable=False)
     booking_datetime = Column(DateTime(timezone=True), nullable=False)
+    end_datetime = Column(DateTime(timezone=True), nullable=True) # For calendar view duration
+    notes = Column(Text, nullable=True) # Notes from the receptionist
     status = Column(String, default="confirmed", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+    source = Column(String, default="ai_booking", nullable=False)
     contact = relationship("Contact", back_populates="bookings")
+    staff = relationship("StaffRoster")
+    service = relationship("MenuItem")
+
+class DeliveryList(Base):
+    __tablename__ = "delivery_lists"
+    id = Column(Integer, primary_key=True, index=True)
+    business_id = Column(Integer, default=1, nullable=False)
+    file_name = Column(String, nullable=True)
+    upload_timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    delivery_date = Column(Date, nullable=False, index=True)
+    status = Column(String, default="processing", nullable=False)
+    deliveries = relationship("DailyDelivery", back_populates="delivery_list", cascade="all, delete-orphan")
+    __table_args__ = (UniqueConstraint('business_id', 'delivery_date', name='_business_delivery_date_uc'),)
+
+class DailyDelivery(Base):
+    __tablename__ = "daily_deliveries"
+    id = Column(Integer, primary_key=True, index=True)
+    delivery_list_id = Column(Integer, ForeignKey('delivery_lists.id'), nullable=False)
+    customer_phone = Column(String, index=True, nullable=False)
+    customer_name = Column(String, nullable=True)
+    customer_address = Column(Text, nullable=True)
+    status = Column(String, default="pending_reconciliation", nullable=False)
+    failure_reason = Column(String, nullable=True)
+    reconciliation_timestamp = Column(DateTime(timezone=True), nullable=True)
+    delivery_list = relationship("DeliveryList", back_populates="deliveries")
+
+class Contact(Base):
+    role = Column(String, nullable=True, index=True)

@@ -14,5 +14,6 @@ class ProfileUpdate(ProfileBase):
 
 class Profile(ProfileBase):
     id: int
+    business_type: str
     class Config:
         from_attributes = True

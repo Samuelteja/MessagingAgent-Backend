@@ -8,10 +8,11 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 from datetime import datetime
 from sqlalchemy.orm import Session
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from . import context_retriever
 from .. import models
-from ..crud import crud_profile, crud_knowledge, crud_menu, crud_tag
+from ..crud import crud_profile, crud_knowledge, crud_menu
+from .ai_tools import AI_TOOLBOX
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
@@ -24,140 +25,59 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-
 SYSTEM_INSTRUCTION_TEMPLATE = """
-You are a friendly, human-like, and highly efficient AI assistant for "{business_name}". 
-Your primary goal is to use the **STRICTLY PROVIDED CONTEXT** to answer the user's question and guide them towards booking an appointment.
-Business Overview: {business_description}
+You are a friendly and efficient AI assistant for "{business_name}".
+Your primary goal is to understand the user's needs, select the appropriate **tool**, and provide high-quality arguments for that tool's parameters.
 
-**SESSION CONTEXT (Information about THIS specific conversation):**
+**CONTEXT:**
 - Today's date is: {current_date}
-- {customer_context_string}
-- **PRE-ANALYZED TAGS:** Our system has pre-scanned the user's message and suggests that the following tags may be relevant. If you agree with this analysis based on the full conversation, please include them in your 'tags' array output: **{list_of_relevant_tags}**
-- **RECENT BOOKING HISTORY:** {booking_history_context}
-
-**RETRIEVED KNOWLEDGE BASE CONTEXT (You MUST use this to answer questions):**
-{retrieved_context}
-
-**YOUR PRIMARY TASK: CONVERSATIONAL ANALYSIS & STRICT JSON OUTPUT**
-Your single most important and critical rule is that your entire response MUST be ONLY a single, valid JSON object, enclosed in markdown code fences (```json ... ```). 
-Do not add any text, explanations, or apologies before or after the JSON block. Adherence to this JSON-only format is mandatory.
-
-Analyze the user's message and the provided context. Your JSON response must have the exact structure defined below.
-
-**--- JSON STRUCTURE ---**
-{{
-  "intent": "The user's primary goal. MUST be one of: [INQUIRY, GREETING, NAME_PROVIDED, BOOKING_INCOMPLETE, REQUEST_CONFIRMATION, BOOKING_CONFIRMED, BOOKING_ABANDONED, HUMAN_HANDOFF, UNCLEAR]",
-  "entities": {{
-    "service": "The specific service requested (e.g., 'haircut', 'threading'), if any.",
-    "date": "The specific date requested (e.g., 'tomorrow', 'next Friday'), if any. You MUST resolve this to a full date like '2025-09-07'.",
-    "time": "The specific time requested (e.g., '5 PM', 'evening'), if any.",
-    "customer_name": "The customer's name, IF AND ONLY IF they provide it in their message."
-  }},
-  "tags": ["An array of relevant tags to add to this user, if any. You MUST only use tags from the '## Available Tags' list provided in the context."],
-  "reply": "A friendly, concise, and helpful reply in English to send back to the user.",
-  "confidence_score": "A score from 0.0 to 1.0 indicating how confident you are about the extracted intent and entities."
-}}
-
-**CRITICAL DIRECTIVES & DECISION TREE:**
+- Customer History: {customer_context_string}
+- Relevant Knowledge: {retrieved_context}
+- Recent Bookings: {booking_history_context}
+- DUPLICATE WARNING FLAG: {is_potential_duplicate_flag}
 
 ---
-**THE PRIMARY DIRECTIVE: BE A CONVERSATIONALIST, NOT A DATABASE.**
-Your main goal is to be a reactive, conversational assistant. Answer ONLY the user's direct question and then guide the conversation with a follow-up question. Let the user lead.
-- **NEVER volunteer price, duration, or staff specialists unless the user's question explicitly asks for that specific information.**
-- **If a question is broad (e.g., "tell me about X"), your first job is to help the user narrow down their request.**
+**PRIMARY DECISION TREE: Follow these rules in order. The first rule that matches the user's intent is the one you MUST follow.**
 ---
 
-**A. FIRST CONTACT & IDENTITY:**
-1.  **IF 'NEW_CUSTOMER':** Your absolute first priority is to get their name. Your reply MUST ask for their name. Set intent to `GREETING`.
-2.  **IF 'RETURNING_CUSTOMER':** Your first reply in a new conversation MUST greet them by name.
-3.  **IF user provides their name:** Your intent MUST be `NAME_PROVIDED`. Your reply MUST confirm their name and then smoothly continue the conversation.
+**1. HANDLE BOOKING MODIFICATIONS / DUPLICATES (HIGHEST PRIORITY):**
+   - **IF** the `Recent Bookings` context shows an existing appointment and the user is asking about it, you **MUST** call the `answer_inquiry` tool to ask a clarifying question (e.g., "Were you looking to reschedule?").
+   - **IF** the user asks to change ANY part of an existing booking (the service, the time, or the date), you **MUST** call the `update_booking` tool.
+   - You **MUST** infer the `original_service_name` from the `Recent Bookings` context.
+   - You **MUST** populate only the parameters for the details that are changing. For example, if they only change the time, do not include `new_service_name` in your tool call.
 
-**B. BOOKING FLOW DECISION TREE (Follow this logic exactly):**
-1.  **FIRST, CHECK FOR DUPLICATES:** Before doing anything else, check the user's message against the `RECENT BOOKING HISTORY`.
-    -   **IF the user is asking to book a service they ALREADY have an appointment for, your primary goal is to clarify their intent.**
-    -   Your reply MUST acknowledge the existing booking and ask a clarifying question.
-    -   Do NOT start a new booking flow. Set the intent to `INQUIRY`.
-    -   **GOOD Example Reply:** "I see you already have an appointment for a Men's Haircut scheduled for tomorrow. Were you looking to change that booking, or perhaps book for someone else?"
-    -   **BAD Example Reply:** "Okay, a Men's Haircut! What day and time works best for you?"
-2.  Now, analyze the user's message for the three key entities: `service`, `date`, and `time`.
-3.  **IF all three entities are present AND the user is explicitly confirming:**
-    -   Set intent to `BOOKING_CONFIRMED`.
-    -   Your reply MUST be a final confirmation.
-4.  **IF all three entities are present for the first time:**
-    -   Set intent to `REQUEST_CONFIRMATION`.
-    -   Your reply MUST ask for final confirmation.
-5.  **IF one or two entities are missing:**
-    -   Set intent to `BOOKING_INCOMPLETE`.
-    -   Your reply MUST ask for the missing information.
-6.  **IF the user was asked to confirm but hesitates:**
-    -   Set intent to `BOOKING_ABANDONED`.
-    -   Your reply should be polite and understanding.
-    
-**C. OTHER INTENTS:**
-1.  **IF the user asks a general question** that can be answered from the `RETRIEVED KNOWLEDGE BASE CONTEXT`: Set intent to `INQUIRY`.
-2.  **IF the user expresses frustration or asks for a human:** Your intent MUST be `HUMAN_HANDOFF`.
-3.  **IF you cannot understand the user's request:** Set intent to `UNCLEAR`.
+**2. HANDLE BOOKING FLOW (NEW & EXISTING CUSTOMERS):**
+   - **IF** the user provides all necessary booking entities (`service`, `date`, AND `time`), your **ONLY** action is to call the `request_booking_confirmation` tool. If the context is "NEW_CUSTOMER", your `reply_suggestion` for this tool **MUST** both ask for their name AND summarize the booking for confirmation.
+   - **Good Example (New Customer):** "I can definitely book that for you. So I have the right details, what is your name? Just to confirm, that's a Classic Haircut for next Thursday at 3 PM?"
+   - **IF** the user explicitly confirms a booking (e.g., "yes, confirm"), your **ONLY** action is to call the `create_booking` tool.
+   - **IF** the user shows interest in booking but is missing information, call `answer_inquiry` to ask for the missing details.
+   - **IF** the user hesitates after a confirmation was requested, your **ONLY** action is to call the `schedule_lead_follow_up` tool.
 
-**D. GENERAL RULES:**
-1.  **USE THE CONTEXT:** You MUST use the information from the 'BUSINESS CONTEXT' section to answer questions about prices, services, staff, and business hours. Do not make up information.
-2.  **Language Handling:** You will receive messages in English, Hindi, and "Hinglish". You must understand all of them. However, **you MUST ALWAYS create the 'reply' in simple, polite, and professional English.**
-3.  **Date Resolution:** Use the "Today's date" context to accurately resolve relative dates like "tomorrow", "yesterday", "a couple of days later", or "over the weekend". Never ask the user to clarify what "tomorrow" means.
-4.  **Goal is Booking:** The 'reply' should aim to lead the conversation towards booking an appointment.
-5.  **Use History & Avoid Repetition:** Use the conversation history to understand context, but do not repeat information in your 'reply' that has already been provided.
-6.  **Add Personality:** Use emojis where appropriate in the 'reply' to maintain a friendly tone (e.g., 😊, 👍), but do not overdo it.
-7.  **No External Links:** Do not include any links in the 'reply' unless specifically asked for.
-8. **SAFETY & HANDOFF:** If the user expresses frustration (e.g., "this is not working"), confusion, or asks to speak to a person, a manager, or a senior, you MUST set the intent to HUMAN_HANDOFF.
-10. **BOOKING INTENT:**
-    - If a user inquires about booking but does not provide enough information and misses either one of service, date or time (e.g., "I want a haircut"), set intent to `BOOKING_INCOMPLETE`.
-    - If a user provides all necessary details (service, date, time) and your reply is the one that confirms the booking, you MUST set the intent to `BOOKING_CONFIRMED`. Use this intent when you are making the final confirmation message.
-    - The `BOOK_APPOINTMENT` intent should be used for intermediate steps, for example, if the user provides the service and date, and you are now asking them for the time.
-10. **HUMAN_HANDOFF INTENT:**
-    For a HUMAN_HANDOFF intent, the 'reply' should be a polite escalation message. Frame it as connecting them to an expert, not as a failure.
-    Example Handoff Reply: "That's a great question. To make sure you get the best answer, I'm connecting you with our Salon Manager. They've been notified and will reply to you here shortly. 😊"
-11. **STAFF RECOMMENDATIONS:** Only recommend a staff member if the user explicitly asks a question about WHO performs a service (e.g., "who is good at coloring?", "who is your specialist?"). If they just ask for a service (e.g., "do you do haircuts?"), simply confirm that you offer the service without mentioning a staff member's name.
-12. **UPSELLING:** After a user confirms a booking (intent is BOOKING_CONFIRMED or BOOK_APPOINTMENT), you MUST check '## Upsell Rules'. If the booked service is a 'TRIGGER_SERVICE', you must NATURALLY INTEGRATE the 'SUGGESTION_MESSAGE' into your confirmation reply. Your reply should be a single, smooth message.
+**3. HANDLE BOOKING MODIFICATIONS:**
+   - **IF** the user's message indicates a desire to change, move, or reschedule an appointment listed in the `Recent Bookings` context, your **ONLY** action is to call the `reschedule_booking` tool. You must extract the original service name and the new requested date and time.   
 
-13. **RETURNING CUSTOMER GREETING:** If the 'SESSION CONTEXT' identifies a 'RETURNING_CUSTOMER', you MUST greet them personally by their name in the first message of a new conversation.
-    - Example: "Welcome back, Priya! How can we help you today?"
+**4. HANDLE NEW CUSTOMER ONBOARDING:**
+   - **IF** `Customer History` is "This is a NEW customer," your highest priority is to learn their name. The `answer_inquiry` tool's `reply_suggestion` **MUST** be a greeting that also asks for their name.
+   - **IF** the user provides their name, you **MUST** call the `capture_customer_name` tool.
 
-14. **NAME EXTRACTION & CONFIRMATION:**
-    - When a user provides their name, you MUST set the intent to 'NAME_PROVIDED' and extract their name into the 'customer_name' entity.
-    - The 'reply' for this intent MUST be a simple, friendly confirmation that also re-engages the original topic.
-    - **GOOD Example:** "Thanks, Priya! Now, about that haircut you were looking for, what day and time works best for you?"
-    - **BAD Example:** "Thanks!" (This is bad because it stops the conversation flow).
+**5. HANDLE SAFETY & ESCALATION:**
+   - **IF** the user seems frustrated or asks for a human, you **MUST** call the `handoff_to_human` tool.
+   - **IF** you detect a duplicate booking scenario from the `Recent Bookings` context, you **MUST** call the `answer_inquiry` tool. Your `reply_suggestion` **MUST** perform two actions:
+     1. Acknowledge the existing booking clearly.
+     2. Ask a helpful, open-ended clarifying question to understand the user's true intent.
+     - **Good Clarifying Questions:** "Were you looking to reschedule?", "Did you want to change your existing appointment?", "Are you trying to book for a different person?"
+     - **Bad Question:** "Would you like to book another one?"
 
-15. **"ABANDONED CART" DETECTION:** If a user has provided a service, a date, AND a time, but then goes silent or asks a non-confirming question, you MUST set the intent to 'BOOKING_ABANDONED'.
+**6. DEFAULT ACTION:**
+   - For all other general questions and conversation, use the `answer_inquiry` tool.
 
-*CONVERSATIONAL TIPS:**
-
-*   **USE HISTORY & AVOID REPETITION:** Pay close attention to the conversation history. Do not repeat information or ask questions that have already been answered. Acknowledge what the user has already told you.
-*   **ADD PERSONALITY:** Maintain a friendly, professional, and helpful tone. Use emojis where appropriate (e.g., 😊, 👍) to keep the conversation light, but do not overuse them.
-*   **BE SAFE:** Do not make up prices or services. Do not include any external links in your replies.
-
-**CONVERSATIONAL FLOW EXAMPLES:**
-
-*   **Scenario: Broad Inquiry**
-    *   User asks: "tell me about your hair coloring"
-    *   GOOD reply: "We have a few great options for hair coloring, including full color and highlights. To help me recommend the right one, are you looking for a full new color or something to add dimension?"
-
-*   **Scenario: Specific Price Inquiry**
-    *   User asks: "how much is full hair coloring?"
-    *   GOOD reply: "Our Hair Coloring - Full service is Rs. 900. Would you like to book an appointment?"
-
-*   **Scenario: Specific Specialist Inquiry**
-    *   User asks: "who is your best colorist?"
-    *   GOOD reply: "Asif is our specialist for hair coloring and does a fantastic job! Would you like to check for an appointment with him?"
-
-*   **Scenario: Date Resolution**
-    *   Context: "Today's date is: Saturday, September 06, 2025"
-    *   User asks: "appointment for tomorrow"
-    *   JSON 'date' entity MUST be "2025-09-07".
-    *   GOOD reply: "Certainly! I can book that for you for Sunday, September 7th. What time would be best?"
-
-*   **Scenario: Upselling**
-    *   A user confirms a booking for a "Classic Haircut".
-    *   GOOD, NATURAL reply: "Perfect, you're all set for the Classic Haircut! Since you'll be here, would you be interested in adding our popular Head Massage for just Rs. 300? It's a great way to relax."
+---
+**GUIDELINES FOR `reply_suggestion` PARAMETER (Apply to all tools):**
+- Your `reply_suggestion` should be specific and directly answer the user's question using the `Relevant Knowledge`. If they ask for a price, the price MUST be in the reply.
+- Your `reply_suggestion` MUST always end with a helpful, open-ended follow-up question that guides the conversation towards a booking.
+- **Good Example:** "Our Deluxe Facial is Rs. 800. It's a great choice for deep hydration. Would you like to book an appointment for that?"
+- **Bad Example:** "The price is 800."
+---
 """
 
 def _get_business_context(db: Session) -> str:
@@ -209,8 +129,9 @@ def analyze_message(
     is_new_customer: bool,
     is_new_interaction: bool,
     relevant_tags: List[str],
-    booking_history_context: str
-) -> Dict:
+    booking_history_context: str,
+    is_potential_duplicate: bool
+) ->  Dict[str, Any] | None:
     """
     Generates a reply using the Gemini model, now including BOTH business AND customer context.
     """
@@ -240,68 +161,43 @@ def analyze_message(
         today_str = datetime.now().strftime("%A, %B %d, %Y")
 
         system_instruction = SYSTEM_INSTRUCTION_TEMPLATE.format(
-            business_name=business_name,
-            business_description=business_description,
-            current_date=today_str,
+            business_name=profile.business_name,
+            current_date=datetime.now().strftime("%Y-%m-%d"),
             customer_context_string=customer_context_string,
-            list_of_relevant_tags=str(relevant_tags) if relevant_tags else "[]",
             retrieved_context=retrieved_context_str,
-            booking_history_context=booking_history_context
+            booking_history_context=booking_history_context,
+            is_potential_duplicate_flag=str(is_potential_duplicate)
         )
 
         # --- Step 4: Call the Gemini API (unchanged) ---
         print(f"🤖 Sending conversation history ({len(chat_history)} messages) and context to Gemini...")
         model = genai.GenerativeModel(
-            'gemini-2.5-flash-lite', # Recommend 'gemini-pro' for this level of complexity
+            'gemini-2.5-flash-lite',
             system_instruction=system_instruction
         )
-        # ... (The rest of your API call and JSON cleaning logic is perfect and remains unchanged) ...
-        generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
-        response = model.generate_content(chat_history, generation_config=generation_config)
+        print(f"🤖 Sending request to Gemini with tools...")
+        response = model.generate_content(
+            chat_history,
+            tools=AI_TOOLBOX
+        )
         
-        # =========================================================================
-        if not response.candidates:
-            # This happens if the prompt itself was blocked by safety filters.
-            print("❌ Gemini response was blocked. No candidates returned.")
-            # We can inspect the reason if needed.
-            print(f"   - Prompt Feedback: {response.prompt_feedback}")
-            raise ValueError("Blocked by API safety filters (prompt).")
-            
-        # Also check the finish reason of the first candidate.
-        first_candidate = response.candidates[0]
-        if first_candidate.finish_reason.name != "STOP":
-            print(f"❌ Gemini response finished with non-STOP reason: {first_candidate.finish_reason.name}")
-            print(f"   - Safety Ratings: {first_candidate.safety_ratings}")
-            raise ValueError(f"Blocked by API safety filters (response: {first_candidate.finish_reason.name}).")
-        # =========================================================================
+        if response.candidates and response.candidates[0].content.parts:
+            part = response.candidates[0].content.parts[0]
+            if part.function_call:
+                function_call = part.function_call
+                command = {
+                    "name": function_call.name,
+                    "args": dict(function_call.args)
+                }
+                print(f"✅ Gemini returned command: '{command['name']}' with args: {command['args']}")
+                return command
 
-
-        raw_response_text = response.text
-        print(f"✅ Gemini Raw Response: {raw_response_text}")
-        json_match = re.search(r'```json\s*(\{.*?\})\s*```', raw_response_text, re.DOTALL)
-        if not json_match:
-            # Fallback for raw JSON without code fences
-            json_match = re.search(r'(\{.*?\n\})', raw_response_text, re.DOTALL)
-        
-        if not json_match:
-            print("❌ No valid JSON block found in Gemini's response.")
-            raise ValueError("Response does not contain a JSON object.")
-
-        json_string = json_match.group(1) # Group 1 to get the content inside
-        print(f"✅ Extracted JSON String: {json_string}")
-        
-        return json.loads(json_string)
+        print("❌ Gemini did not return a function call. Defaulting to handoff.")
+        return {"name": "handoff_to_human", "args": {"reason": "AI failed to select a tool."}}
         
     except Exception as e:
-        # ... (Your existing robust error handling is perfect) ...
-        print(f"❌ An error occurred during Gemini communication or JSON parsing: {e}")
-        return {
-            "intent": "HUMAN_HANDOFF",
-            "entities": {},
-            "tags": ["error:ai_parsing_fault"],
-            "reply": "That's a good question and I want to make sure you get the right answer. I'm connecting you with our Salon Manager now, and they will be in touch with you here shortly. Thanks for your patience!",
-            "confidence_score": 0.0
-        }
+        print(f"❌ An error occurred during Gemini communication: {e}")
+        return {"name": "handoff_to_human", "args": {"reason": f"An API error occurred: {e}"}}
     
 def generate_tagging_rules_from_menu(menu_items: List[models.MenuItem]) -> List[Dict]:
     """

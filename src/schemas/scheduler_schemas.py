@@ -2,12 +2,13 @@
 
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
+from typing import Optional
 
 class ScheduledTaskBase(BaseModel):
     contact_id: str
     task_type: str
     scheduled_time: datetime
-    content: str | None = None
+    content: Optional[str] = None
     status: str
 
 class ScheduledTask(ScheduledTaskBase):

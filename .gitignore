@@ -1,3 +1,4 @@
+# This .gitignore file is for a Python project
 # Python Virtual Environment
 venv/
 

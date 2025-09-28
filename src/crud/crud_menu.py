@@ -1,6 +1,6 @@
 # src/crud/crud_menu.py
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from ..schemas import menu_schemas
 from .. import models
@@ -93,3 +93,23 @@ def create_or_update_upsell_rule(db: Session, trigger_item_id: int, rule: menu_s
     db.commit()
     db.refresh(trigger_item)
     return trigger_item.upsell_rule
+
+def update_menu_item(db: Session, item_id: int, item_update: menu_schemas.MenuItemUpdate) -> Optional[models.MenuItem]:
+    """
+    Updates an existing menu item with new data.
+    Only updates the fields that are provided in the payload.
+    """
+    db_item = db.query(models.MenuItem).filter(models.MenuItem.id == item_id).first()
+    if not db_item:
+        return None
+    
+    # Use Pydantic's .dict() with exclude_unset=True to get only the fields
+    # that were actually sent in the request body.
+    update_data = item_update.dict(exclude_unset=True)
+    
+    for key, value in update_data.items():
+        setattr(db_item, key, value)
+        
+    db.commit()
+    db.refresh(db_item)
+    return db_item

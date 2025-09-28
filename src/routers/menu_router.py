@@ -13,6 +13,7 @@ from ..schemas import menu_schemas
 
 router = APIRouter(prefix="/api/menu", tags=["Menu & Upsells"])
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -20,7 +21,6 @@ def get_db():
     finally:
         db.close()
 
-# --- THIS IS THE SINGLE, CORRECT, UNIFIED BACKGROUND TASK ---
 def _run_menu_post_processing(item_ids: List[int]):
     """
     This single, robust background task creates its own DB session to handle
@@ -94,3 +94,28 @@ def set_upsell_rule(item_id: int, rule: menu_schemas.UpsellRuleCreate, db: Sessi
     if not db_rule:
         raise HTTPException(status_code=404, detail="Trigger menu item not found")
     return db_rule
+
+@router.get("/for-dropdown", response_model=List[menu_schemas.MenuItemDropdown], summary="Get Menu for Dropdowns")
+def read_menu_for_dropdown(db: Session = Depends(get_db)):
+    """Returns a lightweight list of menu items for UI dropdowns."""
+    return [{"id": item.id, "name": item.name} for item in crud_menu.get_menu_items(db)]
+
+@router.put("/{item_id}", response_model=menu_schemas.MenuItem, summary="Update a Menu Item")
+def update_existing_menu_item(
+    item_id: int,
+    item_update: menu_schemas.MenuItemUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Updates a menu item by its ID. Triggers a background task to re-index
+    the embedding and AI tags if the name or description changes.
+    """
+    updated_item = crud_menu.update_menu_item(db, item_id=item_id, item_update=item_update)
+    if not updated_item:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    
+    # Trigger post-processing to ensure embeddings are updated after an edit
+    background_tasks.add_task(_run_menu_post_processing, [updated_item.id])
+    
+    return updated_item
