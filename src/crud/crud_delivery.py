@@ -56,3 +56,44 @@ def get_deliveries_by_date(db: Session, delivery_date: date) -> List[models.Dail
         return []
 
     return delivery_list.deliveries
+
+def get_unreconciled_deliveries_by_date(db: Session, delivery_date: date) -> List[models.DailyDelivery]:
+    """
+    Finds all deliveries for a specific date that are still in the
+    'pending_reconciliation' state. This is used to build the prompt for the manager.
+    """
+    return (
+        db.query(models.DailyDelivery)
+        .join(models.DeliveryList)
+        .filter(
+            models.DeliveryList.delivery_date == delivery_date,
+            models.DailyDelivery.status == 'pending_reconciliation'
+        )
+        .all()
+    )
+
+def bulk_update_delivery_statuses(db: Session, confirmed_ids: List[int], failed_ids: List[int]) -> int:
+    """
+    Performs a high-performance bulk update of delivery statuses based on the parsed
+    manager's reply.
+    """
+    if not confirmed_ids and not failed_ids:
+        return 0
+
+    # This single query updates all relevant records at once.
+    db.query(models.DailyDelivery).filter(models.DailyDelivery.id.in_(confirmed_ids + failed_ids)).update(
+        {
+            models.DailyDelivery.status: case(
+                (models.DailyDelivery.id.in_(confirmed_ids), "reconciled_confirmed"),
+                (models.DailyDelivery.id.in_(failed_ids), "reconciled_failed"),
+            ),
+            models.DailyDelivery.reconciliation_timestamp: datetime.now(timezone.utc)
+        },
+        synchronize_session=False
+    )
+    
+    db.commit()
+    
+    total_updated = len(confirmed_ids) + len(failed_ids)
+    print(f"DB: Bulk updated {total_updated} delivery statuses.")
+    return total_updated

@@ -29,7 +29,7 @@ def validate_booking_conflict(event: BookingCreationEvent):
             event.stop_processing = True
             event.stop_reason = "Duplicate booking detected"
             event.final_reply = (
-                f"It looks like you already have a booking for a '{existing_booking.service_name}' "
+                f"It looks like you already have a booking for a '{existing_booking.service_name_text}' "
                 f"scheduled for {existing_booking.booking_datetime.strftime('%A at %I:%M %p')}. "
                 f"Were you looking to reschedule?"
             )
@@ -53,7 +53,7 @@ def create_booking_record(event: BookingCreationEvent):
             
             # Use the new, local db session
             new_booking = crud_booking.create_booking(event.db_session, event.contact.id, service, booking_datetime)
-            
+            event.db_session.commit()
             print(f"   - Booking #{new_booking.id} committed to DB by listener.")
     finally:
         pass
@@ -77,6 +77,7 @@ def schedule_booking_reminder(event: BookingCreationEvent):
                 content = f"Hi {event.contact.name or 'there'}! Reminder for your {service} appointment tomorrow at {booking_datetime.strftime('%I:%M %p')}."
                 
                 new_reminder = crud_scheduler.create_scheduled_task(event.db_session, event.contact.contact_id, "APPOINTMENT_REMINDER", reminder_time, content)
+                event.db_session.commit()
                 print(f"   - Reminder Task #{new_reminder.id} committed to DB by listener.")
             else:
                 print("   - A reminder already exists for this booking. Skipping.")

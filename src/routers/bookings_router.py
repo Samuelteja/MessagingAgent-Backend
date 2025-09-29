@@ -110,7 +110,7 @@ def update_existing_booking(
 
         # 3. Create a new reminder for the new booking time
         new_reminder_time = updated_booking.booking_datetime - timedelta(hours=24)
-        new_reminder_content = f"Hi {updated_booking.contact.name or 'there'}! Just a note, your appointment for a {updated_booking.service_name} has been updated to {updated_booking.booking_datetime.strftime('%A at %I:%M %p')}. We'll send a reminder the day before."
+        new_reminder_content = f"Hi {updated_booking.contact.name or 'there'}! Just a note, your appointment for a {updated_booking.service_name_text} has been updated to {updated_booking.booking_datetime.strftime('%A at %I:%M %p')}. We'll send a reminder the day before."
         crud_scheduler.create_scheduled_task(db, updated_booking.contact.contact_id, "APPOINTMENT_REMINDER", new_reminder_time, new_reminder_content)
 
     db.commit()
@@ -120,7 +120,7 @@ def update_existing_booking(
     try:
         notification_message = (
             f"Hi {updated_booking.contact.name or 'there'}, please note your appointment has been updated.\n\n"
-            f"Service: {updated_booking.service_name}\n"
+            f"Service: {updated_booking.service_name_text}\n"
             f"New Date & Time: {updated_booking.booking_datetime.strftime('%A, %B %d at %I:%M %p')}\n\n"
             f"If this change wasn't requested by you, please contact us immediately."
         )

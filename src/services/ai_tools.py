@@ -114,6 +114,33 @@ update_booking = {
     }
 }
 
+process_reconciliation = {
+    "name": "process_reconciliation",
+    "description": "Parses a manager's daily delivery reconciliation message to extract which deliveries were confirmed and which failed.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "confirmed_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "A list of all delivery IDs that the manager has marked as successful, confirmed, or 'OK'."
+            },
+            "failed_ids": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "A list of all delivery IDs that the manager has marked as failed, not done, or 'FAIL'."
+            }
+        },
+        "required": ["confirmed_ids", "failed_ids"]
+    }
+}
+
+RECONCILIATION_TOOLBOX = [{
+    "function_declarations": [
+        process_reconciliation,
+    ]
+}]
+
 AI_TOOLBOX = [{
     "function_declarations": [
         update_booking,

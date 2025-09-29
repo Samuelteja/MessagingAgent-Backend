@@ -18,6 +18,7 @@ from typing import Tuple
 from ..services.websocket_manager import manager
 from ..crud import crud_analytics, crud_campaign, crud_contact, crud_knowledge, crud_tag, crud_booking, crud_scheduler
 from ..schemas import analytics_schemas, campaign_schemas, contact_schemas, knowledge_schemas, tag_schemas, webhook_schemas
+from . import reconciliation_controller
 
 # --- CONFIGURATION ---
 MIN_DELAY_SECONDS = 1.8
@@ -163,6 +164,12 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     channel = message.channel
 
     contact = crud_contact.get_or_create_contact(db, contact_id=sender_number, pushname=message.pushname)
+    
+    if contact.role == 'manager':
+        print(f"-> Message from Manager ({contact.contact_id}) detected. Routing to Reconciliation Controller.")
+        reconciliation_controller.process_manager_reconciliation(message, db)
+        return
+    
     if contact.ai_is_paused_until:
         pause_timestamp = contact.ai_is_paused_until
         
@@ -247,12 +254,12 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     is_potential_duplicate = False
     if recent_bookings:
         formatted_bookings = [
-            f"  - {b.service_name} on {b.booking_datetime.strftime('%A, %B %d')} at {b.booking_datetime.strftime('%I:%M %p')}"
+            f"  - {b.service_name_text} on {b.booking_datetime.strftime('%A, %B %d')} at {b.booking_datetime.strftime('%I:%M %p')}"
             for b in recent_bookings
         ]
         booking_history_context = "This customer has the following recent or upcoming appointments:\n" + "\n".join(formatted_bookings)
         for booking in recent_bookings:
-            if booking.service_name.lower() in message_body.lower():
+            if booking.service_name_text.lower() in message_body.lower():
                 is_potential_duplicate = True
                 print("   - POTENTIAL DUPLICATE DETECTED by backend pre-check.")
                 break
@@ -347,13 +354,15 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
             ts = ts.replace(tzinfo=timezone.utc)
         if (datetime.now(timezone.utc) - ts) < CONVERSATION_RESET_THRESHOLD:
             is_fresh_conversation = True
-            
-    if is_fresh_conversation and current_outcome in ['booking_confirmed', 'human_handoff'] and not is_duplicate_inquiry:
+
+    is_modification_request = new_outcome in ["update_booking", "reschedule_booking"]
+
+    if is_fresh_conversation and current_outcome == 'booking_confirmed' and not is_modification_request:
         final_outcome = current_outcome
-        print(f"   - State LOCKED: Fresh, resolved conversation. State remains '{final_outcome}'.")
+        print(f"   - State LOCKED: Fresh, confirmed conversation and new intent is not a modification. State remains '{final_outcome}'.")
     else:
         final_outcome = new_outcome
-        print(f"   - State Update: New or stale conversation. State is now '{final_outcome}'.")
+        print(f"   - State Update: New conversation, stale conversation, or a modification request. State is now '{final_outcome}'.")
     
     if final_outcome == 'create_booking':
         final_outcome = 'booking_confirmed'

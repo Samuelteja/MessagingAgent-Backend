@@ -177,7 +177,7 @@ def get_most_recent_booking_by_service(db: Session, contact_db_id: int, service_
     """Finds the most recent, confirmed booking for a specific service."""
     return db.query(models.Booking).filter(
         models.Booking.contact_db_id == contact_db_id,
-        models.Booking.service_name == service_name,
+        models.Booking.service_name_text == service_name,
         models.Booking.status == 'confirmed'
     ).order_by(models.Booking.booking_datetime.desc()).first()
 

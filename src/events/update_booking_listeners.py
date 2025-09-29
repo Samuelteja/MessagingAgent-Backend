@@ -1,4 +1,4 @@
-# src/events/edit_service_listeners.py
+# src/events/update_booking_listeners.py
 import dateutil.parser
 from datetime import timedelta
 from .event_types import BookingUpdateEvent
@@ -13,7 +13,7 @@ def find_original_booking(event: BookingUpdateEvent):
     print("  [Listener]: Running find_original_booking...")
     db = event.db_session
     params = event.analysis.get("action_params", {})
-    original_service_name = params.get("original_service")
+    original_service_name = params.get("original_service_name")
 
     if not original_service_name:
         event.stop_processing = True
@@ -31,6 +31,7 @@ def find_original_booking(event: BookingUpdateEvent):
         event.final_reply = f"I couldn't find a recent booking for a '{original_service_name}'. Would you like to make a new booking instead?"
         return
     
+    event.context["original_booking_datetime"] = booking_to_change.booking_datetime
     event.context["booking_to_change"] = booking_to_change
     print(f"   - Found original Booking #{booking_to_change.id} to update.")
 
@@ -48,7 +49,7 @@ def process_booking_updates(event: BookingUpdateEvent):
     changes_made = []
 
     # Scenario 1: Update the Service
-    new_service_name = params.get("new_service")
+    new_service_name = params.get("new_service_name")
     if new_service_name:
         new_menu_item = db.query(models.MenuItem).filter(models.MenuItem.name == new_service_name).first()
         if new_menu_item:
@@ -101,14 +102,14 @@ def process_reminder_updates(event: BookingUpdateEvent):
     if event.stop_processing: return
     print("  [Listener]: Running process_reminder_updates...")
     db = event.db_session
-    original_booking = event.context.get("booking_to_change")
+    original_booking_datetime = event.context.get("original_booking_datetime")
     updated_booking = event.context.get("updated_booking")
 
-    time_changed = original_booking.booking_datetime != updated_booking.booking_datetime
+    time_changed = original_booking_datetime != updated_booking.booking_datetime
 
     # Find the reminder associated with the ORIGINAL booking time
     old_reminder = crud_scheduler.get_reminder_for_booking(
-        db, contact_id=event.contact.contact_id, booking_datetime=original_booking.booking_datetime
+        db, contact_id=event.contact.contact_id, booking_datetime=original_booking_datetime
     )
 
     if time_changed:

@@ -8,10 +8,10 @@ cloudflared tunnel --url http://localhost:8000
 My Apps -> (Your App) -> Messenger -> Settings -> Products -> Messenger
 -> Messenger API Settings -> Config webhooks and enable Messenger webhook
 
-pytest -k test_scenario_5_duplicate_booking_handling
+pytest -k test_scenario_6_full_booking_update_flow
 
 netstat -ano | findstr :8000
-taskkill /PID 31252 /F
+taskkill /PID 25164 /F
 
 3. better taggind and auto tagging by AI
 3. better tagging by AI only. 

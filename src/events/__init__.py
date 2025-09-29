@@ -14,7 +14,7 @@ from .booking_listeners import (
 from .abandoned_listeners import schedule_abandoned_cart_followup
 from .contact_listeners import update_contact_name, apply_suggested_tags
 from .handoff_listeners import pause_ai_for_contact
-from .reschedule_listeners import find_and_validate_original_booking, update_booking_record, reschedule_reminder_task, generate_reschedule_reply
+# from .reschedule_listeners import find_and_validate_original_booking, update_booking_record, reschedule_reminder_task, generate_reschedule_reply
 from .update_booking_listeners import find_original_booking, process_booking_updates, process_reminder_updates, generate_update_reply
 
 def register_all_listeners():

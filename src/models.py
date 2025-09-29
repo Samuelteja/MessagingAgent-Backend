@@ -217,6 +217,3 @@ class DailyDelivery(Base):
     failure_reason = Column(String, nullable=True)
     reconciliation_timestamp = Column(DateTime(timezone=True), nullable=True)
     delivery_list = relationship("DeliveryList", back_populates="deliveries")
-
-class Contact(Base):
-    role = Column(String, nullable=True, index=True)

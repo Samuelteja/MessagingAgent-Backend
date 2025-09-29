@@ -21,6 +21,7 @@ def update_contact_name(event: NameCaptureEvent):
             contact_id=event.contact.contact_id,
             new_name=extracted_name
         )
+        event.db_session.commit()
 
 def apply_suggested_tags(event: BaseEvent):
     """LISTENER: Applies any tags suggested by the AI. Runs for most events."""

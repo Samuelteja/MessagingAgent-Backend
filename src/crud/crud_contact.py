@@ -204,3 +204,10 @@ def get_all_contacts(db: Session, skip: int = 0, limit: int = 100):
         .limit(limit)
         .all()
     )
+
+def get_manager_contact(db: Session) -> Optional[models.Contact]:
+    """
+    Finds the designated manager contact for sending system prompts.
+    For the MVP, we assume only one manager.
+    """
+    return db.query(models.Contact).filter(models.Contact.role == 'manager').first()

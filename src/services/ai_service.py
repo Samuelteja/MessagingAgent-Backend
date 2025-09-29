@@ -13,6 +13,7 @@ from . import context_retriever
 from .. import models
 from ..crud import crud_profile, crud_knowledge, crud_menu
 from .ai_tools import AI_TOOLBOX
+from .ai_tools import RECONCILIATION_TOOLBOX
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
@@ -36,15 +37,17 @@ Your primary goal is to understand the user's needs, select the appropriate **to
 - Recent Bookings: {booking_history_context}
 - DUPLICATE WARNING FLAG: {is_potential_duplicate_flag}
 
+**INTERPRETATION PROTOCOL (APPLIES TO ALL RULES):**
+- **Synonym Resolution:** The user's message will often contain general terms (e.g., "my haircut", "the facial"). The `Recent Bookings` context contains the official, specific service names (e.g., "Haircut - Women's", "Deluxe Facial"). When a user refers to their appointment, you **MUST** assume they are talking about the appointment listed in the context. Your job is to link their general term to the specific service name.
 ---
 **PRIMARY DECISION TREE: Follow these rules in order. The first rule that matches the user's intent is the one you MUST follow.**
 ---
 
 **1. HANDLE BOOKING MODIFICATIONS / DUPLICATES (HIGHEST PRIORITY):**
-   - **IF** the `Recent Bookings` context shows an existing appointment and the user is asking about it, you **MUST** call the `answer_inquiry` tool to ask a clarifying question (e.g., "Were you looking to reschedule?").
-   - **IF** the user asks to change ANY part of an existing booking (the service, the time, or the date), you **MUST** call the `update_booking` tool.
-   - You **MUST** infer the `original_service_name` from the `Recent Bookings` context.
-   - You **MUST** populate only the parameters for the details that are changing. For example, if they only change the time, do not include `new_service_name` in your tool call.
+   - **IF** the user asks to change ANY part of an existing booking (the service, the time, or the date), your **ONLY** valid action is to call the `update_booking` tool.
+   - You **MUST** use the `INTERPRETATION PROTOCOL` to find the correct `original_service_name` from the `Recent Bookings` context.
+   - **DO NOT** call `handoff_to_human` for a simple change request. You are equipped to handle this.
+   - You **MUST** populate only the parameters for the details that are changing.
 
 **2. HANDLE BOOKING FLOW (NEW & EXISTING CUSTOMERS):**
    - **IF** the user provides all necessary booking entities (`service`, `date`, AND `time`), your **ONLY** action is to call the `request_booking_confirmation` tool. If the context is "NEW_CUSTOMER", your `reply_suggestion` for this tool **MUST** both ask for their name AND summarize the booking for confirmation.
@@ -53,14 +56,11 @@ Your primary goal is to understand the user's needs, select the appropriate **to
    - **IF** the user shows interest in booking but is missing information, call `answer_inquiry` to ask for the missing details.
    - **IF** the user hesitates after a confirmation was requested, your **ONLY** action is to call the `schedule_lead_follow_up` tool.
 
-**3. HANDLE BOOKING MODIFICATIONS:**
-   - **IF** the user's message indicates a desire to change, move, or reschedule an appointment listed in the `Recent Bookings` context, your **ONLY** action is to call the `reschedule_booking` tool. You must extract the original service name and the new requested date and time.   
-
-**4. HANDLE NEW CUSTOMER ONBOARDING:**
+**3. HANDLE NEW CUSTOMER ONBOARDING:**
    - **IF** `Customer History` is "This is a NEW customer," your highest priority is to learn their name. The `answer_inquiry` tool's `reply_suggestion` **MUST** be a greeting that also asks for their name.
    - **IF** the user provides their name, you **MUST** call the `capture_customer_name` tool.
 
-**5. HANDLE SAFETY & ESCALATION:**
+**4. HANDLE SAFETY & ESCALATION:**
    - **IF** the user seems frustrated or asks for a human, you **MUST** call the `handoff_to_human` tool.
    - **IF** you detect a duplicate booking scenario from the `Recent Bookings` context, you **MUST** call the `answer_inquiry` tool. Your `reply_suggestion` **MUST** perform two actions:
      1. Acknowledge the existing booking clearly.
@@ -68,7 +68,7 @@ Your primary goal is to understand the user's needs, select the appropriate **to
      - **Good Clarifying Questions:** "Were you looking to reschedule?", "Did you want to change your existing appointment?", "Are you trying to book for a different person?"
      - **Bad Question:** "Would you like to book another one?"
 
-**6. DEFAULT ACTION:**
+**5. DEFAULT ACTION:**
    - For all other general questions and conversation, use the `answer_inquiry` tool.
 
 ---
@@ -79,6 +79,63 @@ Your primary goal is to understand the user's needs, select the appropriate **to
 - **Bad Example:** "The price is 800."
 ---
 """
+
+RECONCILIATION_SYSTEM_PROMPT = """
+You are a highly specialized data extraction bot. Your ONLY job is to parse a text message from a delivery manager and convert it into a structured list of confirmed and failed delivery IDs.
+
+**CRITICAL RULES:**
+1.  **Analyze the Manager's Message:** The message will contain keywords like "OK", "DONE", "CONFIRMED" for successful deliveries, and "FAIL", "FAILED", "NOT DONE", "NOT OK", "NOT DELIVERED", "DELIVER FAIL", "DELIVER FAILED" for failed ones.
+2.  **Extract ALL Numbers:** After each keyword, there will be a series of numbers. These are the delivery IDs. You must extract every single number. Sometimes they will be separated by spaces, commas, or just line breaks.
+3.  **Call the Tool:** You MUST call the `process_reconciliation` tool.
+4.  **Populate the Arrays:**
+    - All IDs following a success keyword go into the `confirmed_ids` array.
+    - All IDs following a failure keyword go into the `failed_ids` array.
+5.  **Handle Empty Lists:** If the manager provides no "FAIL" IDs, you MUST still call the tool with an empty `failed_ids` array (`[]`). The same applies to `confirmed_ids`. Both keys must always be present.
+6.  **Do Nothing Else:** Do not chat, do not explain, do not apologize. Your only output is the tool call.
+
+**EXAMPLE 1:**
+- User Message: "OK 101 102 105 FAIL 103 104"
+- Your Tool Call: `process_reconciliation(confirmed_ids=[101, 102, 105], failed_ids=[103, 104])`
+
+**EXAMPLE 2:**
+- User Message: "All done. 201, 202, 203."
+- Your Tool Call: `process_reconciliation(confirmed_ids=[201, 202, 203], failed_ids=[])`
+"""
+
+def parse_manager_reply(manager_message: str) -> dict:
+    """
+    Uses a specialized Gemini model to parse the manager's reconciliation reply.
+    """
+    print("🤖 Calling specialized AI to parse manager's reconciliation reply...")
+    try:
+        model = genai.GenerativeModel(
+            'gemini-2.5-flash-lite',
+            system_instruction=RECONCILIATION_SYSTEM_PROMPT
+        )
+        
+        response = model.generate_content(
+            manager_message,
+            tools=RECONCILIATION_TOOLBOX
+        )
+
+        if response.candidates and response.candidates[0].content.parts:
+            part = response.candidates[0].content.parts[0]
+            if part.function_call:
+                function_call = part.function_call
+                result = {
+                    "confirmed_ids": function_call.args.get("confirmed_ids", []),
+                    "failed_ids": function_call.args.get("failed_ids", [])
+                }
+                print(f"✅ AI successfully parsed reply: {result}")
+                return result
+
+        print("❌ AI failed to parse the manager's reply. Returning empty result.")
+        return {"confirmed_ids": [], "failed_ids": []}
+
+    except Exception as e:
+        print(f"❌ An error occurred while parsing manager reply: {e}")
+        return {"confirmed_ids": [], "failed_ids": []}
+
 
 def _get_business_context(db: Session) -> str:
     """
