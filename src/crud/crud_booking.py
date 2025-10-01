@@ -1,6 +1,7 @@
 # src/crud/crud_booking.py
 
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from datetime import datetime, timezone, timedelta
 from .. import models
 from ..schemas import booking_schemas
@@ -190,18 +191,23 @@ def update_booking_time(db: Session, booking_id: int, new_datetime: datetime) ->
     return db_booking
 
 def get_bookings_with_filters(
-    db: Session, 
-    start_date: datetime, 
-    end_date: datetime, 
-    contact_id: Optional[str] = None, 
+    db: Session,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    contact_id: Optional[str] = None,
     staff_id: Optional[int] = None,
-    service_name: Optional[str] = None, # <-- NEW PARAMETER
-    status: Optional[str] = None # <-- NEW PARAMETER (e.g., 'confirmed', 'cancelled')
+    service_name: Optional[str] = None,
+    status: Optional[str] = None,
+    search_term: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50
 ) -> List[models.Booking]:
     """
-    MODIFIED: Fetches bookings with a more powerful set of filters, including
-    by service name and the booking's status.
+    Fetches bookings with a dynamic set of filters and pagination.
+    Eagerly loads related data for a comprehensive response.
     """
+    print(f"CRUD: Filtering bookings with advanced params including search and pagination.")
+    
     query = (
         db.query(models.Booking)
         .options(
@@ -209,20 +215,32 @@ def get_bookings_with_filters(
             joinedload(models.Booking.staff),
             joinedload(models.Booking.service)
         )
+        .join(models.Booking.contact)
         .order_by(models.Booking.booking_datetime.desc())
     )
 
     if start_date:
         query = query.filter(models.Booking.booking_datetime >= start_date)
     if end_date:
-        query = query.filter(models.Booking.booking_datetime <= end_date)
+        inclusive_end_date = end_date.replace(hour=23, minute=59, second=59)
+        query = query.filter(models.Booking.booking_datetime <= inclusive_end_date + timedelta(days=1))
     if contact_id:
-        query = query.join(models.Contact).filter(models.Contact.contact_id == contact_id)
+        query = query.filter(models.Contact.contact_id == contact_id)
     if staff_id:
         query = query.filter(models.Booking.staff_db_id == staff_id)
     if service_name:
         query = query.filter(models.Booking.service_name_text.ilike(f"%{service_name}%"))
     if status:
         query = query.filter(models.Booking.status == status)
+    
+    if search_term:
+        search_pattern = f"%{search_term}%"
+        query = query.filter(
+            or_(
+                models.Contact.name.ilike(search_pattern),
+                models.Contact.contact_id.ilike(search_pattern)
+            )
+        )
+    query = query.offset(skip).limit(limit)
     
     return query.all()

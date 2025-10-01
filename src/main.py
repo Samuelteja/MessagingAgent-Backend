@@ -61,7 +61,8 @@ app.include_router(menu_router.router)
 app.include_router(profile_router.router)
 app.include_router(scheduler_router.router)
 app.include_router(bookings_router.router)
-app.include_router(delivery_router.router)
+app.include_router(delivery_router.router_delivery_lists)
+app.include_router(delivery_router.router_deliveries)
 app.include_router(test_helpers_router.router)
 
 # ==============================================================================

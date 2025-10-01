@@ -10,13 +10,8 @@ answer_inquiry = {
         "properties": {
              "reply_suggestion": {
                 "type": "string",
-                "description": "A friendly, helpful, and context-aware reply to the user. MUST end with a follow-up question."
+                "description": "A friendly, helpful, and direct answer to the user's question, based on the provided context. The reply MUST end with a helpful follow-up question."
             },
-             "customer_name": {
-                "type": "string",
-                "description": "The user's name, ONLY if they explicitly provide it in their message."
-            },
-
              "service": {
                 "type": "string",
                 "description": "The specific service the user is asking about, if any. This MUST be extracted if mentioned."
@@ -135,6 +130,22 @@ process_reconciliation = {
     }
 }
 
+greet_user = {
+    "name": "greet_user",
+    "description": "Use this tool ONLY as the very first response to a new customer who sends a simple greeting (e.g., 'Hi', 'Hello'). Your reply should welcome them and ask for their name.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+             "reply_suggestion": {
+                "type": "string",
+                "description": "A welcoming greeting that politely asks for the user's name to begin the onboarding process."
+            }
+        },
+        "required": ["reply_suggestion"]
+    }
+}
+
+
 RECONCILIATION_TOOLBOX = [{
     "function_declarations": [
         process_reconciliation,
@@ -143,6 +154,7 @@ RECONCILIATION_TOOLBOX = [{
 
 AI_TOOLBOX = [{
     "function_declarations": [
+        greet_user,
         update_booking,
         answer_inquiry,
         capture_customer_name,

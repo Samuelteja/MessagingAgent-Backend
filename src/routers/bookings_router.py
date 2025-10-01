@@ -155,3 +155,32 @@ def read_bookings_with_filters(
     # The response model `BookingWithDetails` ensures all necessary data (contact, staff, service)
     # is included for any UI rendering purpose.
     return bookings
+
+@router.get("/all", response_model=List[booking_schemas.BookingWithDetails], summary="Get Paginated Booking History with Filters")
+def read_all_bookings_history(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    search_term: Optional[str] = None,
+    staff_id: Optional[int] = None,
+    service_name: Optional[str] = None,
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """
+    Provides a paginated and filterable list of all bookings. This is the
+    primary endpoint for the "All Bookings History" page.
+    """
+    bookings = crud_booking.get_bookings_with_filters(
+        db=db,
+        start_date=start_date,
+        end_date=end_date,
+        search_term=search_term,
+        staff_id=staff_id,
+        service_name=service_name,
+        status=status,
+        skip=skip,
+        limit=limit
+    )
+    return bookings

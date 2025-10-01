@@ -384,6 +384,24 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     
     db.commit()
 
+    print("=> STAGE 6: Broadcasting full conversation update via WebSocket...")
+    try:
+        # We need the most recent conversation record we just saved
+        # The 'contact' object already has its conversations relationship loaded
+        final_convo_obj = contact.conversations[-1]
+
+        # Use the Pydantic schema to serialize the SQLAlchemy object into a dictionary
+        # This guarantees the structure matches the REST API
+        serialized_convo = contact_schemas.Conversation.from_orm(final_convo_obj).dict()
+
+        await manager.broadcast({
+            "type": "conversation_update",
+            "conversation": serialized_convo
+        })
+        print("   - ✅ Successfully broadcasted 'conversation_update'.")
+    except Exception as e:
+        print(f"   - ❌ ERROR during WebSocket broadcast: {e}")
+    
     # --- STAGE 5: SEND REPLY ---
     print(f"=> STAGE 5 [{channel}]: Sending reply...")
     calculated_delay = len(final_reply) / CHARS_PER_SECOND_FACTOR

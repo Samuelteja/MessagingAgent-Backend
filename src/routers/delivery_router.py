@@ -5,22 +5,28 @@ from sqlalchemy.orm import Session
 from ..database import SessionLocal
 import pandas as pd
 import io
-import csv
-import traceback
-import codecs
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 import random
 from ..schemas import delivery_schemas
 from ..crud import crud_delivery
-from typing import List
+from typing import List, Optional
 
 # --- NEW: Import all necessary CRUD modules and services ---
 from ..crud import crud_delivery, crud_campaign, crud_contact
-from ..schemas import campaign_schemas
+from ..schemas import campaign_schemas, delivery_schemas
 
-router = APIRouter(
+class DeliveryStatusUpdate(delivery_schemas.BaseModel):
+    status: str
+    failure_reason: Optional[str] = None
+
+router_deliveries = APIRouter(
+    prefix="/api/deliveries",
+    tags=["Deliveries"]
+)
+
+router_delivery_lists = APIRouter(
     prefix="/api/delivery-lists",
-    tags=["Gas Distributor"]
+    tags=["Delivery Lists"]
 )
 
 def get_db():
@@ -28,7 +34,27 @@ def get_db():
     try: yield db
     finally: db.close()
 
-@router.post("/upload", summary="Upload Daily Delivery List & Trigger Broadcast")
+@router_deliveries.patch("/{delivery_id}/status", response_model=delivery_schemas.DailyDelivery)
+def patch_delivery_status(
+    delivery_id: int,
+    payload: DeliveryStatusUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Manually update the status of a single delivery item.
+    Used by the manager's reconciliation dashboard.
+    """
+    updated_delivery = crud_delivery.update_delivery_status(
+        db,
+        delivery_id=delivery_id,
+        status=payload.status,
+        failure_reason=payload.failure_reason
+    )
+    if not updated_delivery:
+        raise HTTPException(status_code=404, detail="Delivery record not found.")
+    return updated_delivery
+
+@router_delivery_lists.post("/upload", summary="Upload Daily Delivery List & Trigger Broadcast")
 async def upload_delivery_list(
     delivery_date: date = Form(...),
     file: UploadFile = File(...), 
@@ -126,7 +152,26 @@ async def upload_delivery_list(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
     
-@router.get("/{delivery_date}", response_model=List[delivery_schemas.DailyDelivery], summary="Get Daily Deliveries by Date")
+@router_delivery_lists.get("/{delivery_date}", response_model=List[delivery_schemas.DailyDelivery])
+def get_daily_deliveries_by_date_with_filters(
+    delivery_date: date,
+    search_term: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieves the list of delivery items for a specific date, with optional
+    filters for search and status.
+    """
+    deliveries = crud_delivery.get_deliveries_by_date(
+        db,
+        delivery_date=delivery_date,
+        search_term=search_term,
+        status=status
+    )
+    return deliveries
+
+@router_delivery_lists.get("/{delivery_date}", response_model=List[delivery_schemas.DailyDelivery], summary="Get Daily Deliveries by Date")
 def get_daily_deliveries_by_date(delivery_date: date, db: Session = Depends(get_db)):
 
     """

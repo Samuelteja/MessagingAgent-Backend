@@ -26,6 +26,7 @@ class Contact(Base):
     conversations = relationship("Conversation", back_populates="contact", cascade="all, delete-orphan")
     tags = relationship("Tag", secondary=contact_tags_association, back_populates="contacts")
     bookings = relationship("Booking", back_populates="contact", cascade="all, delete-orphan")
+    role = Column(String, nullable=True, index=True)
 
 class Conversation(Base):
     __tablename__ = "conversations"

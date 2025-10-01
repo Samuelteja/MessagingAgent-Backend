@@ -2,8 +2,9 @@
 
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from datetime import date
-from typing import List, Dict
+from sqlalchemy import or_, case
+from datetime import date, datetime, timezone
+from typing import List, Dict, Optional
 from .. import models
 
 def create_delivery_list(db: Session, delivery_date: date, file_name: str) -> models.DeliveryList:
@@ -37,25 +38,35 @@ def create_daily_deliveries_bulk(db: Session, delivery_list_id: int, deliveries_
     db.bulk_save_objects(db_deliveries)
     db.commit()
 
-def get_deliveries_by_date(db: Session, delivery_date: date) -> List[models.DailyDelivery]:
+def get_deliveries_by_date(
+    db: Session,
+    delivery_date: date,
+    search_term: Optional[str] = None,
+    status: Optional[str] = None
+) -> List[models.DailyDelivery]:
     """
-    Fetches all individual delivery items for a specific date by finding the
-    parent DeliveryList for that date.
+    REFACTORED: Fetches all individual delivery items for a specific date,
+    now with optional filters for search and status.
     """
-    # Find the parent list for the given date. We use joinedload to eagerly
-    # fetch all the 'deliveries' in a single, efficient query.
-    delivery_list = (
-        db.query(models.DeliveryList)
-        .options(joinedload(models.DeliveryList.deliveries))
+    query = (
+        db.query(models.DailyDelivery)
+        .join(models.DeliveryList)
         .filter(models.DeliveryList.delivery_date == delivery_date)
-        .first()
     )
 
-    if not delivery_list:
-        # If no list was uploaded for that day, return an empty list.
-        return []
+    if status:
+        query = query.filter(models.DailyDelivery.status == status)
 
-    return delivery_list.deliveries
+    if search_term:
+        search_filter = f"%{search_term}%"
+        query = query.filter(
+            or_(
+                models.DailyDelivery.customer_name.ilike(search_filter),
+                models.DailyDelivery.customer_phone.ilike(search_filter)
+            )
+        )
+
+    return query.order_by(models.DailyDelivery.id.asc()).all()
 
 def get_unreconciled_deliveries_by_date(db: Session, delivery_date: date) -> List[models.DailyDelivery]:
     """
@@ -71,6 +82,31 @@ def get_unreconciled_deliveries_by_date(db: Session, delivery_date: date) -> Lis
         )
         .all()
     )
+
+def update_delivery_status(
+    db: Session,
+    delivery_id: int,
+    status: str,
+    failure_reason: Optional[str] = None
+) -> Optional[models.DailyDelivery]:
+    """
+    Updates the status and optional failure reason for a SINGLE delivery record.
+    This is used for manual reconciliation from the dashboard.
+    """
+    db_delivery = db.query(models.DailyDelivery).filter(models.DailyDelivery.id == delivery_id).first()
+
+    if not db_delivery:
+        return None
+
+    db_delivery.status = status
+    db_delivery.failure_reason = failure_reason
+    db_delivery.reconciliation_timestamp = datetime.now(timezone.utc)
+    
+    db.commit()
+    db.refresh(db_delivery)
+    
+    print(f"DB: Manually updated status for Delivery ID {delivery_id} to '{status}'.")
+    return db_delivery
 
 def bulk_update_delivery_statuses(db: Session, confirmed_ids: List[int], failed_ids: List[int]) -> int:
     """
