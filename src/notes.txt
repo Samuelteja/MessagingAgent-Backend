@@ -11,7 +11,7 @@ My Apps -> (Your App) -> Messenger -> Settings -> Products -> Messenger
 pytest -k test_scenario_6_full_booking_update_flow
 
 netstat -ano | findstr :8000
-taskkill /PID 25164 /F
+taskkill /PID 12688 /F
 
 3. better taggind and auto tagging by AI
 3. better tagging by AI only. 

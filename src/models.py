@@ -22,6 +22,7 @@ class Contact(Base):
     name = Column(String, nullable=True) # Will store pushname or the name they provide
     is_name_confirmed = Column(Boolean, default=False, nullable=False)
     ai_is_paused_until = Column(DateTime(timezone=True), nullable=True)
+    conversation_state = Column(JSON, nullable=False, server_default='{}')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     conversations = relationship("Conversation", back_populates="contact", cascade="all, delete-orphan")
     tags = relationship("Tag", secondary=contact_tags_association, back_populates="contacts")

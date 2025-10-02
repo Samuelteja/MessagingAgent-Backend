@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from ..database import SessionLocal
 from ..services import whatsapp_service
@@ -101,3 +101,25 @@ async def simulate_incoming_message(payload: SendMessagePayload, db: Session = D
     await message_controller.process_incoming_message(normalized_message, db)
     
     return {"status": "ok", "message": "Simulated message injected into the pipeline."}
+
+@router.get("/get-state/{contact_id:path}", response_model=Dict[str, Any], summary="Get a contact's conversation state")
+def get_contact_state(contact_id: str, db: Session = Depends(get_db)):
+    """
+    FOR E2E TESTING: Retrieves the raw conversation_state JSON object
+    for a specific contact.
+    """
+    contact = crud_contact.get_contact_by_contact_id(db, contact_id=contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return contact.conversation_state
+
+@router.post("/set-state/{contact_id:path}", response_model=Dict[str, Any], summary="Set a contact's conversation state")
+def set_contact_state(contact_id: str, payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """
+    FOR E2E TESTING: Overwrites the conversation_state for a specific
+    contact with the provided JSON payload.
+    """
+    updated_contact = crud_contact.set_conversation_state(db, contact_id=contact_id, new_state=payload)
+    if not updated_contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return updated_contact.conversation_state

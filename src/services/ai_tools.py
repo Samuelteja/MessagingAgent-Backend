@@ -2,37 +2,57 @@
 
 # --- Tool Definitions (Formatted for Google's Gemini API) ---
 
-answer_inquiry = {
-    "name": "answer_inquiry",
-    "description": "The default tool for all conversational replies. Use this to answer questions, greet users, and ask clarifying questions. It is MANDATORY to extract any entities you identify (like a service name, date, or customer name) into the appropriate parameters.",
+UPDATED_STATE_SCHEMA = {
+    "type": "object",
+    "description": "OPTIONAL: The full, updated conversation state object to be persisted for the next turn."
+}
+
+continue_conversation = {
+    "name": "continue_conversation",
+    "description": "The default tool for all standard conversational replies. Use this to ask questions, answer questions, and guide the user, while updating the conversational state.",
     "parameters": {
         "type": "object",
         "properties": {
-             "reply_suggestion": {
-                "type": "string",
-                "description": "A friendly, helpful, and direct answer to the user's question, based on the provided context. The reply MUST end with a helpful follow-up question."
-            },
-             "service": {
-                "type": "string",
-                "description": "The specific service the user is asking about, if any. This MUST be extracted if mentioned."
-            }
+            "reply_suggestion": {"type": "string"},
+            "updated_state": UPDATED_STATE_SCHEMA
         },
-        "required": ["reply_suggestion"]
+        "required": ["reply_suggestion", "updated_state"]
     }
 }
 
-request_booking_confirmation = {
-    "name": "request_booking_confirmation",
-    "description": "Use this when a user has provided all necessary details (service, date, time) for a booking for the first time. This tool asks for the user's final confirmation before the booking is made.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "service": {"type": "string"}, "date": {"type": "string"}, "time": {"type": "string"},
-            "reply_suggestion": {"type": "string", "description": "A summary of the booking details asking for confirmation."}
-        },
-        "required": ["service", "date", "time", "reply_suggestion"]
-    }
-}
+# answer_inquiry = {
+#     "name": "answer_inquiry",
+#     "description": "The default tool for all conversational replies. Use this to answer questions, greet users, and ask clarifying questions. It is MANDATORY to extract any entities you identify (like a service name, date, or customer name) into the appropriate parameters.",
+#     "parameters": {
+#         "type": "object",
+#         "properties": {
+#              "reply_suggestion": {
+#                 "type": "string",
+#                 "description": "A friendly, helpful, and direct answer to the user's question, based on the provided context. The reply MUST end with a helpful follow-up question."
+#             },
+#              "service": {
+#                 "type": "string",
+#                 "description": "The specific service the user is asking about, if any. This MUST be extracted if mentioned."
+#             },
+#             "updated_state": UPDATED_STATE_SCHEMA
+#         },
+#         "required": ["reply_suggestion", "service", "updated_state"]
+#     }
+# }
+
+# request_booking_confirmation = {
+#     "name": "request_booking_confirmation",
+#     "description": "Use this when a user has provided all necessary details (service, date, time) for a booking for the first time. This tool asks for the user's final confirmation before the booking is made.",
+#     "parameters": {
+#         "type": "object",
+#         "properties": {
+#             "service": {"type": "string"}, "date": {"type": "string"}, "time": {"type": "string"},
+#             "reply_suggestion": {"type": "string", "description": "A summary of the booking details asking for confirmation."},
+#             "updated_state": UPDATED_STATE_SCHEMA
+#         },
+#         "required": ["service", "date", "time", "reply_suggestion", "updated_state"]
+#     }
+# }
 
 create_booking = {
     "name": "create_booking",
@@ -40,9 +60,10 @@ create_booking = {
     "parameters": {
         "type": "object",
         "properties": {
-            "service": {"type": "string"}, "date": {"type": "string"}, "time": {"type": "string"}
+            "service": {"type": "string"}, "date": {"type": "string"}, "time": {"type": "string"},
+            "updated_state": UPDATED_STATE_SCHEMA
         },
-        "required": ["service", "date", "time"]
+        "required": ["service", "date", "time", "updated_state"]
     }
 }
 
@@ -53,16 +74,24 @@ schedule_lead_follow_up = {
         "type": "object",
         "properties": {
             "reply_suggestion": {"type": "string", "description": "A polite, understanding reply to the user's hesitation."},
-            "service": {"type": "string", "description": "The service they were about to book, if known."}
+            "service": {"type": "string", "description": "The service they were about to book, if known."},
+            "updated_state": UPDATED_STATE_SCHEMA
         },
-        "required": ["reply_suggestion"]
+        "required": ["reply_suggestion", "updated_state"]
     }
 }
 
 handoff_to_human = {
     "name": "handoff_to_human",
     "description": "Use this as a safety net when the user is frustrated, confused, asks for a human, or the request is too complex to handle.",
-    "parameters": { "type": "object", "properties": { "reason": {"type": "string"} }, "required": ["reason"] }
+    "parameters": { 
+        "type": "object", 
+        "properties": { 
+            "reason": {"type": "string"},
+            "updated_state": UPDATED_STATE_SCHEMA
+        }, 
+        "required": ["reason", "updated_state"] 
+    }
 }
 
 capture_customer_name = {
@@ -71,10 +100,11 @@ capture_customer_name = {
     "parameters": {
         "type": "object",
         "properties": {
-            "customer_name": {"type": "string", "description": "The name the user provided."},
-            "reply_suggestion": {"type": "string", "description": "A reply that confirms the name and asks a follow-up question."}
+            "customer_name": {"type": "string"},
+            "reply_suggestion": {"type": "string"},
+            "updated_state": UPDATED_STATE_SCHEMA
         },
-        "required": ["customer_name", "reply_suggestion"]
+        "required": ["customer_name", "reply_suggestion", "updated_state"]
     }
 }
 
@@ -103,9 +133,10 @@ update_booking = {
             "reply_suggestion": {
                 "type": "string",
                 "description": "A polite, helpful reply confirming the requested change and asking for follow-up if needed."
-            }
+            },
+            "updated_state": UPDATED_STATE_SCHEMA
         },
-        "required": ["original_service_name", "reply_suggestion"]
+        "required": ["original_service_name", "reply_suggestion", "updated_state"]
     }
 }
 
@@ -130,20 +161,20 @@ process_reconciliation = {
     }
 }
 
-greet_user = {
-    "name": "greet_user",
-    "description": "Use this tool ONLY as the very first response to a new customer who sends a simple greeting (e.g., 'Hi', 'Hello'). Your reply should welcome them and ask for their name.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-             "reply_suggestion": {
-                "type": "string",
-                "description": "A welcoming greeting that politely asks for the user's name to begin the onboarding process."
-            }
-        },
-        "required": ["reply_suggestion"]
-    }
-}
+# greet_user = {
+#     "name": "greet_user",
+#     "description": "Use this tool ONLY as the very first response to a new customer who sends a simple greeting (e.g., 'Hi', 'Hello'). Your reply should welcome them and ask for their name.",
+#     "parameters": {
+#         "type": "object",
+#         "properties": {
+#              "reply_suggestion": {
+#                 "type": "string",
+#                 "description": "A welcoming greeting that politely asks for the user's name to begin the onboarding process."
+#             }
+#         },
+#         "required": ["reply_suggestion"]
+#     }
+# }
 
 
 RECONCILIATION_TOOLBOX = [{
@@ -154,11 +185,9 @@ RECONCILIATION_TOOLBOX = [{
 
 AI_TOOLBOX = [{
     "function_declarations": [
-        greet_user,
-        update_booking,
-        answer_inquiry,
+        continue_conversation, # The new primary tool
         capture_customer_name,
-        request_booking_confirmation,
+        update_booking,
         create_booking,
         schedule_lead_follow_up,
         handoff_to_human,

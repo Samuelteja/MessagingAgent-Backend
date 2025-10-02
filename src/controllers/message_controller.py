@@ -3,6 +3,8 @@ import dateutil.parser
 from datetime import timedelta
 import asyncio
 from sqlalchemy.orm import Session
+from .utils import deep_convert_to_dict
+from sqlalchemy.orm.attributes import flag_modified
 from .. import schemas, crud, models
 from ..services import ai_service, whatsapp_service, tag_pre_scanner
 import time
@@ -24,6 +26,7 @@ from . import reconciliation_controller
 MIN_DELAY_SECONDS = 1.8
 MAX_DELAY_SECONDS = 10.0
 CHARS_PER_SECOND_FACTOR = 35
+CONVERSATION_RESET_THRESHOLD = timedelta(hours=48)
 
 OUTCOME_HIERARCHY = {
     "pending": 0, "unclear": 1, "answer_inquiry": 2,
@@ -234,8 +237,12 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
             return
     
     print(f"=> STAGE 1 [{channel}]: Business is OPEN. Proceeding...")
-
     # --- STAGE 2: PREPARE CONVERSATION HISTORY ---
+    print(f"=> STAGE 2 [{message.channel}]: Preparing context with conversational memory...")
+
+    current_state = contact.conversation_state
+    state_for_ai = current_state.copy()
+
     last_convo = crud_contact.get_last_conversation(db, contact_id=sender_number)
     current_outcome = "pending"
     if last_convo:
@@ -243,9 +250,11 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
 
-        time_since = datetime.now(timezone.utc) - ts
-        if time_since < CONVERSATION_RESET_THRESHOLD:
-            current_outcome = last_convo.outcome
+        if (datetime.now(timezone.utc) - ts) > CONVERSATION_RESET_THRESHOLD:
+            print("   - Stale conversation detected. Ignoring previous AI 'goal' for this turn.")
+            if 'goal' in state_for_ai: state_for_ai['goal'] = None
+            if 'goal_params' in state_for_ai: state_for_ai['goal_params'] = {}
+
     db_history = crud_contact.get_chat_history(db, contact_id=sender_number, limit=10)
     
     # Fetch recent booking history for context
@@ -276,7 +285,7 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
             gemini_history.append({'role': 'model', 'parts': [msg.outgoing_text]})
     gemini_history.append({'role': 'user', 'parts': [message_body]})
 
-    # --- STAGE 3: CALL THE SUPERCHARGED AI BRAIN (Pass the new flag) ---
+    # --- STAGE 3 (REVISED): CALL AI WITH MEMORY ---
     print(f"=> STAGE 3 [{channel}]: Calling Supercharged AI Service...")
     if channel == "WhatsApp":
         whatsapp_service.set_typing(sender_number, True)
@@ -286,18 +295,17 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
         chat_history=gemini_history, 
         db=db, 
         db_contact=contact,
-        is_new_customer=is_new_customer_for_ai,
-        is_new_interaction=is_new_interaction,
         relevant_tags=relevant_tags,
-        booking_history_context=booking_history_context,
-        is_potential_duplicate=is_potential_duplicate
+        conversation_state=state_for_ai
     )
     
     if not command:
         command = {"name": "handoff_to_human", "args": {"reason": "AI failed to select a tool."}}
 
-    function_name = command["name"]
-    function_args = command["args"]
+    function_name = command.get("name")
+    function_args = {}
+    if command and "args" in command:
+        function_args = deep_convert_to_dict(command["args"])
     print(f"=> STAGE 4: AI returned tool '{function_name}'. Dispatching event...")
     
     analysis_payload = {"action_params": function_args}
@@ -369,7 +377,32 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     elif final_outcome == 'request_booking_confirmation':
         final_outcome = 'request_confirmation'
 
-    print(f"=> STAGE 5: Logging final outcome '{final_outcome}' and sending reply.")
+    # --- STAGE 5 (RENAMED): PERSIST & RETIRE CONVERSATIONAL STATE ---
+    raw_updated_state  = function_args.get("updated_state")
+    if raw_updated_state:
+        clean_updated_state = deep_convert_to_dict(raw_updated_state)
+        print(f"   - AI returned new state. Persisting: {clean_updated_state}")
+        contact.conversation_state = clean_updated_state
+    else:
+        print(f"   - AI did not return a new state. Preserving existing state.")
+        contact.conversation_state = state_for_ai
+
+    # "State Retirement" for terminal outcomes
+    if final_outcome in ["booking_confirmed", "human_handoff"]:
+        print(f"   - Terminal outcome '{final_outcome}' reached. Retiring active state.")
+        if contact.conversation_state:
+            # We create a new dict to avoid modifying the old one in place
+            retired_state = dict(contact.conversation_state)
+            retired_state["goal"] = None
+            retired_state["goal_params"] = {}
+            contact.conversation_state = retired_state
+    
+    # This is CRUCIAL. It tells SQLAlchemy that the JSON field has been
+    # changed and needs to be included in the UPDATE statement.
+    flag_modified(contact, "conversation_state")
+    # ====================================================
+
+    print(f"=> STAGE 6: Logging final outcome '{final_outcome}' and sending reply.")
 
     # Log the full exchange with the FINAL reply generated by our system.
     crud_contact.log_conversation(

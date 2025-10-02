@@ -3,6 +3,7 @@ import random
 import re
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, cast, Date, case
+from sqlalchemy.orm.attributes import flag_modified
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from .. import models
@@ -211,3 +212,19 @@ def get_manager_contact(db: Session) -> Optional[models.Contact]:
     For the MVP, we assume only one manager.
     """
     return db.query(models.Contact).filter(models.Contact.role == 'manager').first()
+
+def get_conversation_state(db: Session, contact_id: str) -> dict:
+    """Fetches the raw conversation_state JSON for a contact."""
+    contact = get_contact_by_contact_id(db, contact_id)
+    return contact.conversation_state if contact else {}
+
+def set_conversation_state(db: Session, contact_id: str, new_state: dict) -> Optional[models.Contact]:
+    """Overwrites the conversation_state for a contact for testing purposes."""
+    contact = get_contact_by_contact_id(db, contact_id)
+    if contact:
+        contact.conversation_state = new_state
+        # Crucially, flag the JSON field as modified for SQLAlchemy to detect the change
+        flag_modified(contact, "conversation_state")
+        db.commit()
+        db.refresh(contact)
+    return contact
