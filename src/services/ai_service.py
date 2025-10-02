@@ -324,15 +324,6 @@ def analyze_message(
         profile = crud_profile.get_profile(db)
         
         # --- Step 2: Build the NEW Dynamic Customer Context String ---
-        customer_context_string = ""
-        if is_new_interaction:
-            if is_new_customer:
-                customer_context_string = "Customer Status: This is a NEW_CUSTOMER."
-            else:
-                customer_context_string = f'Customer Status: This is a RETURNING_CUSTOMER named "{db_contact.name}".'
-        else:
-            customer_context_string = f'Customer Status: This is an ongoing conversation with "{db_contact.name or "the user"}".'
-
         business_context = {
             "business_name": profile.business_name,
             "current_date": datetime.now().strftime("%Y-%m-%d"),
@@ -357,7 +348,8 @@ def analyze_message(
         print(f"🤖 Sending conversation history ({len(chat_history)} messages) and context to Gemini...")
         model = genai.GenerativeModel(
             'gemini-2.5-flash-lite',
-            system_instruction=system_instruction
+            system_instruction=system_instruction,
+            tools=AI_TOOLBOX
         )
         print(f"🤖 Sending request to Gemini with tools...")
         response = model.generate_content(
