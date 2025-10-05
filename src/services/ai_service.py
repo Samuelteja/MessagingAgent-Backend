@@ -14,7 +14,8 @@ from .. import models
 from ..crud import crud_profile, crud_knowledge, crud_menu, crud_booking, crud_contact
 from .ai_tools import AI_TOOLBOX
 from .ai_tools import RECONCILIATION_TOOLBOX
-from . import ai_prompt_builder 
+# from . import ai_prompt_builder
+from ..controllers.utils import deep_convert_to_dict
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
@@ -99,6 +100,7 @@ You are a stateful, self-aware, and highly efficient AI assistant for "{business
 - Customer History: {customer_context_string}
 - Relevant Knowledge (from RAG): {retrieved_context}
 - Recent Bookings: {booking_history_context}
+- Pre-scanned Topics: {tags_context}    
 
 # --- CONVERSATIONAL MEMORY (Your Brain) ---
 # This block tells you what your immediate goal and recent history are.
@@ -125,28 +127,33 @@ Your job is to analyze the user's message in the context of both your **Knowledg
     - Your action is to call the `continue_conversation` tool with a polite refusal that pivots back to the business.
     - **Good Refusal Reply:** "I'm sorry, I'm just an assistant for {business_name} and don't have information about that. Is there anything I can help you with regarding our services or bookings?"
 
-4.  **SYNONYM RESOLUTION:**
+4.  **UNIVERSAL TAGGING RULE:**
+    - On EVERY turn, you MUST analyze the user's message for any specific services or topics mentioned (e.g., "haircut", "facial", "bridal makeup", "pedicure").
+    - If you identify any, you MUST add a corresponding "interest" tag to the `updated_state.context.tags` array in your tool call.
+    # Escape the curly braces by doubling them
+    - The tag format MUST be `interest:{{service-name-slugified}}`.
+    - Example: If the user says "how much is a pedicure?", you MUST include `"tags": ["interest:pedicure"]` in the `updated_state.context`.
+
+5.  **SYNONYM RESOLUTION:**
     - The `Recent Bookings` context contains official service names (e.g., "Deluxe Facial"). Users will use general terms (e.g., "my facial"). You **MUST** correctly link the general term to the specific service name from the context when calling tools like `update_booking`.
 
 ---
 **STATE-BASED BEHAVIOR (Your Goal-Oriented Logic):**
 You must behave differently based on your `current_conversation_state.goal`.
 
-**IF your `goal` is "ONBOARDING_INITIAL_GREETING":**
-  - **Your Primary Task:** Greet a new user for the first time.
-  - **Your Action:** Call `continue_conversation`.
-  - **`reply_suggestion`:** A polite welcome message that asks for their name (e.g., "Welcome to {business_name}! So I can save your details for future bookings, what is your name?").
-  - **`updated_state`:** You MUST set the next `goal` to `ONBOARDING_CAPTURE_NAME` and set `goal_params.retry_count` to 1.
 
 **IF your `goal` is "ONBOARDING_CAPTURE_NAME":**
   - **Your Primary Task:** Get the user's name.
   - **IF the user provides their name:**
     - **Your Action:** Call the `capture_customer_name` tool.
     - **`updated_state`:** You MUST set the next `goal` to `GENERAL_INQUIRY` and clear `goal_params`.
-  - **IF the user asks a question (INTERRUPTION - P0 BUG SCENARIO):**
+  - **IF the user asks a question:**
     - **Your Action:** Call `continue_conversation`.
     - **`reply_suggestion`:** First, directly answer their question using `Relevant Knowledge`. Then, gently re-ask for their name to get back on track (e.g., "We are open from 9 AM to 8 PM. So I can save those details, what's your name?").
-    - **`updated_state`:** The `goal` MUST remain `ONBOARDING_CAPTURE_NAME`. You MUST increment the `retry_count`. The `flags.user_interrupted_flow` MUST be `true`.
+    - **`updated_state`:** You MUST return the full state object with these changes:
+      - The `goal` MUST remain `ONBOARDING_CAPTURE_NAME`.
+      - The `goal_params.retry_count` MUST be incremented.
+      - The `goal_params.flags.user_interrupted_flow` MUST be set to `true`.
 
 **IF your `goal` is "AWAITING_BOOKING_CONFIRMATION":**
   - **Your Primary Task:** Get an explicit 'yes' or 'no' for the booking summarized in `state.context.pending_booking`.
@@ -158,16 +165,29 @@ You must behave differently based on your `current_conversation_state.goal`.
     - **`updated_state`:** You MUST set the next `goal` to `GENERAL_INQUIRY`.
 
 **IF your `goal` is "GENERAL_INQUIRY":**
-  - **Your Primary Task:** Be helpful. Answer questions and identify booking opportunities.
-  - **IF this is a brand new conversation with a new customer:** Your first action is to set the goal to `ONBOARDING_INITIAL_GREETING`.
-  - **IF you can gather all details for a new booking (`service`, `date`, `time`):**
-    - **Your Action:** Call `continue_conversation`.
-    - **`reply_suggestion`:** A summary of the booking asking for final confirmation.
-    - **`updated_state`:** You MUST set the next `goal` to `AWAITING_BOOKING_CONFIRMATION` and populate `context.pending_booking` with the details.
-  - **FOR ALL OTHER questions:**
-    - **Your Action:** Call `continue_conversation`.
-    - **`reply_suggestion`:** A direct answer to their question, ending with a helpful follow-up question to guide them towards booking (e.g., "Yes, our Deluxe Facial is Rs. 800. Would you like to book one?").
-    - **`updated_state`:** The `goal` should remain `GENERAL_INQUIRY`.
+  - **Your Primary Task:** Handle the user's request by following these steps in order.
+
+  - **Step 1: Booking Check (Highest Priority for this goal).**
+    - **IF** the user's message contains all details for a new booking (`service`, `date`, AND `time`):
+      - **Action:** You MUST call the `request_booking_confirmation` tool.
+      - **Arguments:**
+        - `service`, `date`, `time`: The extracted details.
+        - **`reply_suggestion`:**
+          - **IF** `Customer History` is "This is a NEW_CUSTOMER.": Your reply MUST summarize the booking AND ask for their name. (Example: "Great! I have a Men's Haircut for Friday at 3 PM. So I can save this for you, what's your name?")
+          - **ELSE (for a returning customer):** Your reply MUST summarize the booking AND ask for explicit confirmation. (Example: "Welcome back! Just to confirm, that's a Men's Haircut for Friday at 3 PM. Is that correct?")
+        - `updated_state`: Set the next `goal` to `AWAITING_BOOKING_CONFIRMATION`.
+      - **(This is your ONLY action if this rule matches. Do not proceed to Step 2.)**
+
+  - **Step 2: Onboarding & General Inquiry (The Fallback).**
+    - **IF** the previous step did not apply:
+      - **Action:** Call the `continue_conversation` tool.
+      - **Arguments:**
+        - **`reply_suggestion`:**
+          - **IF** `Customer History` is "This is a NEW_CUSTOMER.": Answer their question (if any) and then ask for their name.
+          - **ELSE (for a returning customer):** Provide a direct answer and end with a helpful follow-up question.
+        - `updated_state`:
+          - **IF** `Customer History` is "This is a NEW_CUSTOMER.": Set the next `goal` to `ONBOARDING_CAPTURE_NAME`.
+          - **ELSE (for a returning customer):** The `goal` should remain `GENERAL_INQUIRY`.
 
 ---
 **FINAL GUIDELINE FOR ALL REPLIES:**
@@ -215,18 +235,33 @@ def parse_manager_reply(manager_message: str) -> dict:
 
         if response.candidates and response.candidates[0].content.parts:
             part = response.candidates[0].content.parts[0]
-            if part.function_call:
+            
+            # Check if the part actually contains a function_call before trying to access it
+            if hasattr(part, 'function_call') and part.function_call:
                 function_call = part.function_call
-                result = {
-                    "confirmed_ids": function_call.args.get("confirmed_ids", []),
-                    "failed_ids": function_call.args.get("failed_ids", [])
+                
+                # Safely get the name using getattr, which is a good practice
+                command_name = getattr(function_call, 'name', 'unknown')
+                
+                # Safely get the arguments and convert them
+                command_args = {}
+                if hasattr(function_call, 'args'):
+                    command_args = deep_convert_to_dict(function_call.args)
+
+                command = {
+                    "name": command_name,
+                    "args": command_args
                 }
-                print(f"✅ AI successfully parsed reply: {result}")
-                return result
+                print(f"✅ Gemini returned command: '{command['name']}' with args: {command['args']}")
+                return command
+            else:
+                # This case handles if the AI returns text instead of a tool call
+                print("❌ Gemini returned a text response instead of a tool call. Defaulting to handoff.")
+                # You can log part.text here for debugging if needed: print(f"   - AI Text: {part.text}")
+                return {"name": "handoff_to_human", "args": {"reason": "AI returned text instead of a tool."}}
 
-        print("❌ AI failed to parse the manager's reply. Returning empty result.")
-        return {"confirmed_ids": [], "failed_ids": []}
-
+        print("❌ Gemini did not return a valid function call or any parts. Defaulting to handoff.")
+        return {"name": "handoff_to_human", "args": {"reason": "AI failed to select a tool or returned empty response."}}
     except Exception as e:
         print(f"❌ An error occurred while parsing manager reply: {e}")
         return {"confirmed_ids": [], "failed_ids": []}
@@ -324,48 +359,39 @@ def analyze_message(
         profile = crud_profile.get_profile(db)
         
         # --- Step 2: Build the NEW Dynamic Customer Context String ---
-        business_context = {
-            "business_name": profile.business_name,
-            "current_date": datetime.now().strftime("%Y-%m-%d"),
-            "customer_context_string": customer_context_string,
-            "retrieved_context": retrieved_context_str,
-            "booking_history_context": booking_history_context,
-            "tags_context": tags_context
-        }
-        
-        # --- Step 2: Call the Dynamic Prompt Generator (THE KEY CHANGE) ---
-        # print(f"🧠 Generating dynamic prompt for goal: '{conversation_state.get('goal', 'GENERAL_INQUIRY')}'...")
-        
-        system_instruction = ai_prompt_builder.generate_dynamic_prompt(
-            conversation_state=conversation_state,
-            business_context=business_context
+        system_instruction = SYSTEM_INSTRUCTION_TEMPLATE.format(
+            business_name=profile.business_name,
+            current_date=datetime.now().strftime("%Y-%m-%d"),
+            customer_context_string=customer_context_string,
+            retrieved_context=retrieved_context_str,
+            booking_history_context=booking_history_context,
+            tags_context=tags_context,
+            conversation_state_json=json.dumps(conversation_state, indent=2)
         )
-        
-        # You can uncomment the line below for debugging to see the exact prompt being sent
-        # print(f"\n--- PROMPT SENT TO GEMINI ---\n{system_instruction}\n---------------------------\n")
 
-        # --- Step 4: Call the Gemini API (unchanged) ---
-        print(f"🤖 Sending conversation history ({len(chat_history)} messages) and context to Gemini...")
+        #print("system_instruction:", system_instruction)
+
         model = genai.GenerativeModel(
-            'gemini-2.5-flash-lite',
-            system_instruction=system_instruction,
+            model_name='gemini-2.5-pro',
             tools=AI_TOOLBOX
         )
-        print(f"🤖 Sending request to Gemini with tools...")
-        response = model.generate_content(
-            chat_history,
-            tools=AI_TOOLBOX
-        )
+
+        full_chat_history = [{'role': 'user', 'parts': [system_instruction]}]
+        full_chat_history.append({'role': 'model', 'parts': ["OK, I understand. I will now act as the AI assistant and only call tools."]})
+        full_chat_history.extend(chat_history)
         
+        # 3. Call generate_content with the combined history.
+        response = model.generate_content(full_chat_history)
+
         if response.candidates and response.candidates[0].content.parts:
             part = response.candidates[0].content.parts[0]
-            if part.function_call:
+            if hasattr(part, 'function_call') and part.function_call:
                 function_call = part.function_call
-                command_name = function_call.name
-                command_args = dict(function_call.args) # Convert the top-level args
-                
-                if "updated_state" in command_args and not isinstance(command_args["updated_state"], dict):
-                    command_args["updated_state"] = dict(command_args["updated_state"])
+                command_name = getattr(function_call, 'name', 'unknown')
+                command_args = {}
+                if hasattr(function_call, 'args'):
+                    # The deep_convert_to_dict is now called HERE.
+                    command_args = deep_convert_to_dict(function_call.args)
                 command = {
                     "name": command_name,
                     "args": command_args

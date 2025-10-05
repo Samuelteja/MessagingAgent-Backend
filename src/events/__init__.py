@@ -9,7 +9,7 @@ from .event_types import (
 
 # --- Import all our new listeners ---
 from .booking_listeners import (
-    validate_booking_conflict, create_booking_record, schedule_booking_reminder, generate_booking_reply
+    validate_booking_conflict, create_booking_record, schedule_booking_reminder, generate_booking_reply, schedule_short_term_reminder
 )
 from .abandoned_listeners import schedule_abandoned_cart_followup
 from .contact_listeners import update_contact_name, apply_suggested_tags
@@ -39,6 +39,7 @@ def register_all_listeners():
     register_listener(BookingCreationEvent, validate_booking_conflict)
     register_listener(BookingCreationEvent, create_booking_record)
     register_listener(BookingCreationEvent, schedule_booking_reminder)
+    register_listener(BookingCreationEvent, schedule_short_term_reminder)
     register_listener(BookingCreationEvent, apply_suggested_tags)
     register_listener(BookingCreationEvent, generate_booking_reply)
     # register_listener(BookingCreationEvent, generate_booking_reply)

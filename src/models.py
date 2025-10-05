@@ -3,6 +3,7 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, Text, DateTime, 
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
+from datetime import timezone
 
 conversation_tags_association = Table('conversation_tags_association', Base.metadata,
     Column('conversation_id', Integer, ForeignKey('conversations.id'), primary_key=True),

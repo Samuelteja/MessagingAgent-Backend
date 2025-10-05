@@ -26,11 +26,14 @@ def update_contact_name(event: NameCaptureEvent):
 def apply_suggested_tags(event: BaseEvent):
     """LISTENER: Applies any tags suggested by the AI. Runs for most events."""
     print("  [Listener]: Running apply_suggested_tags...")
-    tags_to_apply = set(event.analysis.get("tags", []))
+    action_params = event.analysis.get("action_params", {})
+    updated_state = action_params.get("updated_state", {})
+    context = updated_state.get("context", {})
+    tags_to_apply = set(context.get("tags", []))
     
     # --- THIS IS THE NEW, SMARTER LOGIC ---
     # Check if the AI identified a specific service entity
-    entities = event.analysis.get("action_params", {}) # Or "entities" depending on final AI prompt
+    entities = action_params
     service_name = entities.get("service")
     
     if service_name:

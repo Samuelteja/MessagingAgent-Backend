@@ -8,6 +8,8 @@ venv/
 # Python cache
 __pycache__/
 *.pyc
+all_code.txt
+getAllData.py
 
 # Database file
 database/

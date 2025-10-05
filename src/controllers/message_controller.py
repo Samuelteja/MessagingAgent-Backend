@@ -241,6 +241,13 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     print(f"=> STAGE 2 [{message.channel}]: Preparing context with conversational memory...")
 
     current_state = contact.conversation_state
+    if not current_state:
+        print("   - Empty state detected. Initializing state for a new conversation.")
+        current_state = {
+            "goal": "GENERAL_INQUIRY",
+            "goal_params": {},
+            "context": {}
+        }
     state_for_ai = current_state.copy()
 
     last_convo = crud_contact.get_last_conversation(db, contact_id=sender_number)
@@ -292,11 +299,11 @@ async def process_incoming_message(message: webhook_schemas.NormalizedMessage, d
     
     relevant_tags = tag_pre_scanner.find_relevant_tags(message_body, db)
     command = ai_service.analyze_message(
-        chat_history=gemini_history, 
-        db=db, 
+        conversation_state=state_for_ai,
+        chat_history=gemini_history,
+        db=db,
         db_contact=contact,
-        relevant_tags=relevant_tags,
-        conversation_state=state_for_ai
+        relevant_tags=relevant_tags
     )
     
     if not command:
