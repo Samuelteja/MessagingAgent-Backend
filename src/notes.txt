@@ -13,6 +13,17 @@ pytest -k test_scenario_6_full_booking_update_flow
 netstat -ano | findstr :8000
 taskkill /PID 12688 /F
 
+Git: 
+stage bd commit and then later
+git push -u origin ft/domain-userstory2-ai-workflow
+
+Finally 
+git checkout main
+git pull origin main
+git merge feature/domain-architecture-refactor
+git push origin main
+
+
 3. better taggind and auto tagging by AI
 3. better tagging by AI only. 
 4. they can add exisitn customer database.
